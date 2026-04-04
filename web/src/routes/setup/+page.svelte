@@ -24,6 +24,12 @@
   let verifyingSelf = false;
   let selfVerifyMsg = "";
 
+  let prodWebsiteUrl = "";
+  let prodUseCase = "";
+  let requestingProd = false;
+  let prodMsg = "";
+  let prodError = "";
+
   $: selfIdentity = verifiedEmails.find(e => e.email === $auth.email);
 
   onMount(load);
@@ -91,6 +97,20 @@
     }
   }
 
+  async function requestProductionAccess() {
+    if (!prodWebsiteUrl || !prodUseCase) return;
+    requestingProd = true; prodMsg = ""; prodError = "";
+    try {
+      const res = await api.requestProductionAccess(prodWebsiteUrl, prodUseCase);
+      prodMsg = res.message;
+      await load();
+    } catch (e) {
+      prodError = (e as Error).message;
+    } finally {
+      requestingProd = false;
+    }
+  }
+
   async function removeEmail(email: string) {
     await api.removeVerifiedEmail(email);
     verifiedEmails = verifiedEmails.filter(e => e.email !== email);
@@ -141,18 +161,51 @@
           </div>
         </div>
 
-        <div class="sandbox-steps">
-          <h3>Request production access</h3>
-          <p class="hint">AWS reviews requests within 24–48 hours. Select <strong>Transactional</strong> and describe your use case as a self-hosted mail server.</p>
-          <a
-            class="btn btn-primary production-btn"
-            href="https://console.aws.amazon.com/ses/home#/account"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Open SES Account Dashboard →
-          </a>
-        </div>
+        {#if sesStatus.productionReview?.status === "PENDING"}
+          <div class="review-pending">
+            <span class="review-icon">⏳</span>
+            <div>
+              <strong>Production access review in progress</strong>
+              <p class="hint">AWS is reviewing your request. Approval typically takes 24–48 hours.</p>
+              {#if sesStatus.productionReview.caseId}
+                <p class="hint mono">Case ID: {sesStatus.productionReview.caseId}</p>
+              {/if}
+            </div>
+          </div>
+        {:else if sesStatus.productionReview?.status === "FAILED"}
+          <div class="review-failed">
+            <span>✗ Production access request was denied.</span>
+            <p class="hint">You can submit a new request below.</p>
+          </div>
+        {/if}
+
+        {#if !sesStatus.productionReview || sesStatus.productionReview.status === "FAILED"}
+          <div class="sandbox-steps">
+            <h3>Request production access</h3>
+            <p class="hint">AWS reviews requests within 24–48 hours.</p>
+            <input
+              type="url"
+              bind:value={prodWebsiteUrl}
+              placeholder="https://mail.yourdomain.com"
+              class="prod-input"
+            />
+            <textarea
+              bind:value={prodUseCase}
+              placeholder="Describe your use case — e.g. self-hosted transactional mail server for caffeine.church. Sending password resets, notifications, and personal email for domain users."
+              rows="4"
+              class="prod-input"
+            />
+            {#if prodMsg}<p class="success">{prodMsg}</p>{/if}
+            {#if prodError}<p class="err">{prodError}</p>{/if}
+            <button
+              class="btn btn-primary"
+              on:click={requestProductionAccess}
+              disabled={requestingProd || !prodWebsiteUrl || !prodUseCase}
+            >
+              {requestingProd ? "Submitting…" : "Request production access"}
+            </button>
+          </div>
+        {/if}
       </section>
     {:else if sesStatus}
       <section class="card ok-card">
@@ -363,6 +416,16 @@
   .quota-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .sandbox-steps { display: flex; flex-direction: column; gap: 10px; }
   .sandbox-steps h3 { font-size: 13px; font-weight: 600; }
+  .prod-input { width: 100%; padding: 8px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--text-primary); font-family: inherit; resize: vertical; }
+
+  .review-pending {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: rgba(91,138,208,.08); border: 1px solid rgba(91,138,208,.25);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+  }
+  .review-icon { font-size: 18px; }
+  .review-failed { color: var(--danger); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+  .mono { font-family: var(--font-mono); font-size: 12px; }
 
   /* Your Email Identity */
   .identity-verified { border-color: rgba(91,208,138,.35); background: rgba(91,208,138,.04); }

@@ -76,11 +76,14 @@
 <div class="inbox">
   <header class="toolbar">
     <h2 class="folder-title">{folder.charAt(0).toUpperCase() + folder.slice(1)}</h2>
-    {#if folder === "trash" && emails.length > 0}
-      <button class="btn btn-ghost danger" on:click={emptyTrash} disabled={emptyingTrash}>
-        {emptyingTrash ? "Deleting…" : "Empty Trash"}
-      </button>
-    {/if}
+    <div class="toolbar-actions">
+      <button class="btn btn-ghost" on:click={load} disabled={loading} title="Refresh">↺</button>
+      {#if folder === "trash" && emails.length > 0}
+        <button class="btn btn-ghost danger" on:click={emptyTrash} disabled={emptyingTrash}>
+          {emptyingTrash ? "Deleting…" : "Empty Trash"}
+        </button>
+      {/if}
+    </div>
   </header>
 
   {#if loading}
@@ -141,6 +144,7 @@
     border-bottom: 1px solid var(--border);
     background: var(--bg-surface);
   }
+  .toolbar-actions { display: flex; align-items: center; gap: 4px; }
   .toolbar .danger { color: var(--danger); }
   .folder-title {
     font-size: 15px;

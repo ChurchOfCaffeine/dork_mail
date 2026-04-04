@@ -141,6 +141,8 @@ resource "aws_iam_role_policy" "api_inline" {
           "ses:VerifyEmailIdentity",
           "ses:ListIdentities",
           "ses:DeleteIdentity",
+          "ses:GetAccount",
+          "ses:PutAccountDetails",
         ]
         Resource = "*"
       },

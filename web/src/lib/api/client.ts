@@ -113,7 +113,12 @@ export async function getSesStatus() {
     dkim: unknown;
     inSandbox: boolean;
     quota: { max24Hour: number; maxSendRate: number; sentLast24Hours: number };
+    productionReview: { status: string; caseId?: string } | null;
   }>("GET", "/dns/ses-status");
+}
+
+export async function requestProductionAccess(websiteUrl: string, useCaseDescription: string) {
+  return request<{ message: string }>("POST", "/dns/request-production-access", { websiteUrl, useCaseDescription });
 }
 
 export async function triggerSesVerify() {

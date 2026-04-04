@@ -1,12 +1,13 @@
 /**
  * DNS / Setup Wizard API — admin only.
- * GET  /api/dns/check                  — reads Route 53 zone, returns DNS record status
- * POST /api/dns/apply                  — writes missing/incorrect records to Route 53
- * GET  /api/dns/ses-status             — SES domain verification, DKIM, sandbox status
- * POST /api/dns/ses-verify             — triggers SES domain verification re-check
- * GET  /api/dns/verified-emails        — list SES verified email identities (sandbox testing)
- * POST /api/dns/verified-emails        — send verification email to an address
- * DELETE /api/dns/verified-emails/{email} — remove a verified email identity
+ * GET  /api/dns/check                        — reads Route 53 zone, returns DNS record status
+ * POST /api/dns/apply                        — writes missing/incorrect records to Route 53
+ * GET  /api/dns/ses-status                   — SES domain verification, DKIM, sandbox/review status
+ * POST /api/dns/ses-verify                   — triggers SES domain verification re-check
+ * GET  /api/dns/verified-emails              — list SES verified email identities (sandbox testing)
+ * POST /api/dns/verified-emails              — send verification email to an address
+ * DELETE /api/dns/verified-emails/{email}    — remove a verified email identity
+ * POST /api/dns/request-production-access    — submit SES production access request via SESv2
  */
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { Logger } from "@aws-lambda-powertools/logger";
@@ -29,13 +30,21 @@ import {
   GetSendQuotaCommand,
   IdentityType,
 } from "@aws-sdk/client-ses";
+import {
+  SESv2Client,
+  GetAccountCommand,
+  PutAccountDetailsCommand,
+  MailType,
+  ContactLanguage,
+} from "@aws-sdk/client-sesv2";
 import type { DnsCheckResult, DnsRecord, DkimRecord, ApiResponse } from "@dork-mail/shared";
 
 const logger = new Logger({ serviceName: "api-dns" });
 const tracer = new Tracer({ serviceName: "api-dns" });
 
-const r53 = tracer.captureAWSv3Client(new Route53Client({}));
-const ses = tracer.captureAWSv3Client(new SESClient({}));
+const r53   = tracer.captureAWSv3Client(new Route53Client({}));
+const ses   = tracer.captureAWSv3Client(new SESClient({}));
+const sesv2 = tracer.captureAWSv3Client(new SESv2Client({}));
 
 const DOMAIN = process.env.MAIL_DOMAIN!;
 const HOSTED_ZONE_ID = process.env.HOSTED_ZONE_ID!;
@@ -48,13 +57,14 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const path = event.path;
   const method = event.httpMethod;
 
-  if (method === "GET"    && path.endsWith("/check"))           return checkDns();
-  if (method === "POST"   && path.endsWith("/apply"))           return applyDns(event);
-  if (method === "GET"    && path.endsWith("/ses-status"))      return sesStatus();
-  if (method === "POST"   && path.endsWith("/ses-verify"))      return sesVerify();
-  if (method === "GET"    && path.endsWith("/verified-emails")) return listVerifiedEmails();
-  if (method === "POST"   && path.endsWith("/verified-emails")) return addVerifiedEmail(event);
-  if (method === "DELETE" && path.includes("/verified-emails/")) return removeVerifiedEmail(path);
+  if (method === "GET"    && path.endsWith("/check"))                    return checkDns();
+  if (method === "POST"   && path.endsWith("/apply"))                    return applyDns(event);
+  if (method === "GET"    && path.endsWith("/ses-status"))               return sesStatus();
+  if (method === "POST"   && path.endsWith("/ses-verify"))               return sesVerify();
+  if (method === "GET"    && path.endsWith("/verified-emails"))          return listVerifiedEmails();
+  if (method === "POST"   && path.endsWith("/verified-emails"))          return addVerifiedEmail(event);
+  if (method === "DELETE" && path.includes("/verified-emails/"))         return removeVerifiedEmail(path);
+  if (method === "POST"   && path.endsWith("/request-production-access")) return requestProductionAccess(event);
 
   return json(404, { ok: false, error: "Not found" });
 };
@@ -128,14 +138,17 @@ async function applyDns(event: APIGatewayProxyEvent): Promise<APIGatewayProxyRes
 // ─── SES Status ───────────────────────────────────────────────────────────────
 
 async function sesStatus(): Promise<APIGatewayProxyResult> {
-  const [verStatus, dkimAttrs, quota] = await Promise.all([
+  const [verStatus, dkimAttrs, quota, account] = await Promise.all([
     getSesVerification(),
     getSesDkim(),
     ses.send(new GetSendQuotaCommand({})),
+    sesv2.send(new GetAccountCommand({})).catch(() => null),
   ]);
 
   // Sandbox accounts are capped at 200 emails/day and 1/sec send rate
   const inSandbox = quota.Max24HourSend === 200 && quota.MaxSendRate === 1;
+
+  const review = account?.Details?.ReviewDetails ?? null;
 
   return json(200, {
     ok: true,
@@ -148,8 +161,30 @@ async function sesStatus(): Promise<APIGatewayProxyResult> {
         maxSendRate: quota.MaxSendRate,
         sentLast24Hours: quota.SentLast24Hours,
       },
+      productionReview: review ? {
+        status: review.Status ?? "UNKNOWN",
+        caseId: review.CaseId,
+      } : null,
     },
   });
+}
+
+async function requestProductionAccess(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const body = parseBody<{ websiteUrl: string; useCaseDescription: string }>(event.body);
+  if (!body?.websiteUrl || !body.useCaseDescription) {
+    return json(400, { ok: false, error: "websiteUrl and useCaseDescription required" });
+  }
+
+  await sesv2.send(new PutAccountDetailsCommand({
+    MailType: MailType.TRANSACTIONAL,
+    WebsiteURL: body.websiteUrl,
+    UseCaseDescription: body.useCaseDescription,
+    ContactLanguage: ContactLanguage.EN,
+    ProductionAccessEnabled: true,
+  }));
+
+  logger.info("Production access requested");
+  return json(200, { ok: true, data: { message: "Production access request submitted. AWS will review within 24–48 hours." } });
 }
 
 async function sesVerify(): Promise<APIGatewayProxyResult> {

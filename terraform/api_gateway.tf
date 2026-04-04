@@ -132,6 +132,7 @@ locals {
     "GET /api/dns/verified-emails"                   = aws_apigatewayv2_integration.dns.id
     "POST /api/dns/verified-emails"                  = aws_apigatewayv2_integration.dns.id
     "DELETE /api/dns/verified-emails/{email}"        = aws_apigatewayv2_integration.dns.id
+    "POST /api/dns/request-production-access"        = aws_apigatewayv2_integration.dns.id
   }
 }
 
