@@ -1,0 +1,36 @@
+{
+  "name": "@dork-mail/functions",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc && node scripts/bundle.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-lambda-powertools/logger": "^2.9.0",
+    "@aws-lambda-powertools/metrics": "^2.9.0",
+    "@aws-lambda-powertools/tracer": "^2.9.0",
+    "@aws-lambda-powertools/parameters": "^2.9.0",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/client-ses": "^3.600.0",
+    "@aws-sdk/client-route-53": "^3.600.0",
+    "@aws-sdk/client-ssm": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/s3-request-presigner": "^3.600.0",
+    "mailparser": "^3.7.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "@dork-mail/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/mailparser": "^3.4.4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.0.0",
+    "archiver": "^7.0.1",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}

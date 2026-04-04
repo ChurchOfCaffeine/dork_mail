@@ -1,0 +1,15 @@
+{
+  "name": "dork-mail",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build:functions": "pnpm --filter @dork-mail/functions build",
+    "build:web": "pnpm --filter @dork-mail/web build",
+    "build": "pnpm build:functions && pnpm build:web",
+    "dev": "pnpm --filter @dork-mail/web dev",
+    "gen-password-hash": "node scripts/gen-password-hash.mjs"
+  },
+  "devDependencies": {
+    "bcryptjs": "^2.4.3"
+  }
+}

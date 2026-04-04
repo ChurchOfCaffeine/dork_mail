@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in values before running terraform apply.
+
+
+domain        = "yourdomain.com"       # must have a Route 53 hosted zone in this account
+web_subdomain = "mail"               # results in mail.yourdomain.com
+aws_region     = "us-east-1"
+
+# Generate: openssl rand -base64 48
+jwt_secret = "REPLACE_ME"
+
+# Initial admin user
+admin_email        = "you@yourdomain.com"
+admin_display_name = "Your Name"
+# Generate: pnpm gen-password-hash
+admin_password_hash = "$2a$12$REPLACE_ME"
+
+tags = {
+  Environment = "prod"
+}
