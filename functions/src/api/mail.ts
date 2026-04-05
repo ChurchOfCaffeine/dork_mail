@@ -20,6 +20,7 @@ import {
   QueryCommand,
   DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
+import type { User } from "@dork-mail/shared";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
@@ -125,11 +126,21 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     return json(400, { ok: false, error: "to and subject required" });
   }
 
-  const toAddresses = body.to.map(a => a.address);
-  const ccAddresses = (body.cc ?? []).map(a => a.address);
+  // Look up display name so From shows "Name <email>" instead of bare address
+  const userRecord = await ddb.send(new GetCommand({
+    TableName: TABLE,
+    Key: { pk: `user#${userEmail}`, sk: "profile" },
+  }));
+  const displayName = (userRecord.Item as User | undefined)?.displayName;
+  const fromAddress = displayName
+    ? `"${displayName.replace(/"/g, '\\"')}" <${userEmail}>`
+    : userEmail;
+
+  const toAddresses = body.to.map(a => a.name ? `"${a.name.replace(/"/g, '\\"')}" <${a.address}>` : a.address);
+  const ccAddresses = (body.cc ?? []).map(a => a.name ? `"${a.name.replace(/"/g, '\\"')}" <${a.address}>` : a.address);
 
   const res = await ses.send(new SendEmailCommand({
-    Source: userEmail,
+    Source: fromAddress,
     Destination: {
       ToAddresses: toAddresses,
       CcAddresses: ccAddresses.length ? ccAddresses : undefined,
@@ -152,7 +163,7 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     pk: `mailbox#${userEmail}`,
     sk: `ts#${ts}#${sesMessageId}`,
     messageId: sesMessageId,
-    from: { address: userEmail },
+    from: { address: userEmail, name: displayName },
     to: body.to,
     cc: body.cc,
     subject: body.subject,

@@ -89,6 +89,14 @@
     <div class="sidebar-footer">
       {#if $auth.isAdmin}
         <a
+          href="/mail/admin/users"
+          class="btn btn-ghost setup-btn"
+          title={collapsed ? "Users" : undefined}
+        >
+          <span>👥</span>
+          {#if !collapsed}<span>Users</span>{/if}
+        </a>
+        <a
           href="/setup"
           class="btn btn-ghost setup-btn"
           title={collapsed ? "Setup / DNS" : undefined}
@@ -97,6 +105,14 @@
           {#if !collapsed}<span>Setup / DNS</span>{/if}
         </a>
       {/if}
+      <a
+        href="/mail/account"
+        class="btn btn-ghost setup-btn"
+        title={collapsed ? "Account" : undefined}
+      >
+        <span>◉</span>
+        {#if !collapsed}<span>Account</span>{/if}
+      </a>
       <div class="user-area">
         {#if !collapsed}
           <span class="user-email">{$auth.email}</span>
@@ -277,10 +293,10 @@
   @media (max-width: 767px) {
     .mobile-topbar {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       gap: 10px;
-      height: 52px;
-      padding: 0 12px;
+      height: calc(52px + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) 12px 0;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border);
       position: fixed;
@@ -304,7 +320,7 @@
     }
 
     .shell {
-      padding-top: 52px;
+      padding-top: calc(52px + env(safe-area-inset-top));
       height: 100dvh;
     }
 

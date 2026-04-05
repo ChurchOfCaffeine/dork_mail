@@ -118,7 +118,10 @@ resource "aws_apigatewayv2_route" "post_login" {
 # Protected routes
 locals {
   protected_routes = {
+    "GET /api/auth/users"                            = aws_apigatewayv2_integration.auth.id
     "POST /api/auth/users"                           = aws_apigatewayv2_integration.auth.id
+    "PATCH /api/auth/users/{email}"                  = aws_apigatewayv2_integration.auth.id
+    "DELETE /api/auth/users/{email}"                 = aws_apigatewayv2_integration.auth.id
     "GET /api/mail"                                  = aws_apigatewayv2_integration.mail.id
     "GET /api/mail/{messageId}"                      = aws_apigatewayv2_integration.mail.id
     "POST /api/mail/send"                            = aws_apigatewayv2_integration.mail.id

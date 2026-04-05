@@ -9,6 +9,7 @@ import type {
   SendEmailRequest,
   DnsCheckResult,
   DnsRecord,
+  UserPublic,
 } from "@dork-mail/shared";
 
 const BASE = "/api";
@@ -56,10 +57,25 @@ export async function login(email: string, password: string) {
   );
 }
 
-export async function createUser(email: string, password: string, displayName: string) {
+export async function createUser(email: string, password: string, displayName: string, isAdmin = false) {
   return request<{ email: string; displayName: string }>(
-    "POST", "/auth/users", { email, password, displayName }
+    "POST", "/auth/users", { email, password, displayName, isAdmin }
   );
+}
+
+export async function listUsers() {
+  return request<UserPublic[]>("GET", "/auth/users");
+}
+
+export async function updateUser(
+  email: string,
+  patch: { displayName?: string; currentPassword?: string; newPassword?: string; isAdmin?: boolean }
+) {
+  return request<{ email: string }>("PATCH", `/auth/users/${encodeURIComponent(email)}`, patch);
+}
+
+export async function deleteUser(email: string) {
+  return request<void>("DELETE", `/auth/users/${encodeURIComponent(email)}`);
 }
 
 // ─── Mail ─────────────────────────────────────────────────────────────────────

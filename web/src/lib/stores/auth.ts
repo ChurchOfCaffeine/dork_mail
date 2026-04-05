@@ -26,6 +26,10 @@ function createAuthStore() {
       localStorage.setItem("isAdmin", String(isAdmin));
       set({ token, email, displayName, isAdmin });
     },
+    updateDisplayName(displayName: string) {
+      localStorage.setItem("displayName", displayName);
+      update(s => ({ ...s, displayName }));
+    },
     logout() {
       localStorage.removeItem("token");
       localStorage.removeItem("userEmail");

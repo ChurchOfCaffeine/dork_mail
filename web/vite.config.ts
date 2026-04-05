@@ -12,6 +12,7 @@ export default defineConfig({
         name: "Dork Mail",
         short_name: "Dork Mail",
         description: "Self-hosted personal email",
+        version: "1.0.0",
         theme_color: "#5b6ad0",
         background_color: "#0f1117",
         display: "standalone",
@@ -25,7 +26,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,svg,ico,woff2}"],
+        globPatterns: ["**/*.{js,css,html,svg,ico,woff2,webmanifest}"],
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,

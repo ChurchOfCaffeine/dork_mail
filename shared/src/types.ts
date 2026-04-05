@@ -62,6 +62,14 @@ export interface User {
   isAdmin: boolean;
 }
 
+/** User record with sensitive fields omitted — safe to return from API */
+export interface UserPublic {
+  email: string;
+  displayName: string;
+  createdAt: string;
+  isAdmin: boolean;
+}
+
 export interface Mailbox {
   /** DynamoDB PK: "mailbox#<email>" */
   pk: string;
