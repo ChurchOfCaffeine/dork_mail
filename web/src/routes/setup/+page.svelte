@@ -194,7 +194,7 @@
               placeholder="Describe your use case — e.g. self-hosted transactional mail server for caffeine.church. Sending password resets, notifications, and personal email for domain users."
               rows="4"
               class="prod-input"
-            />
+            ></textarea>
             {#if prodMsg}<p class="success">{prodMsg}</p>{/if}
             {#if prodError}<p class="err">{prodError}</p>{/if}
             <button
@@ -446,7 +446,6 @@
   .identity-badge.missing { background: rgba(208,91,106,.12); color: var(--danger); }
   .identity-email { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius-sm); }
   .identity-ok-msg { font-size: 13px; color: var(--success); }
-  .production-btn { align-self: flex-start; text-decoration: none; }
 
   /* Verified emails */
   .add-email-row { display: flex; gap: 8px; }

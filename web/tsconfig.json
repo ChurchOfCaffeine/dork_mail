@@ -1,9 +1,6 @@
 {
   "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
-    "strict": true,
-    "paths": {
-      "@dork-mail/shared": ["../shared/src/index.ts"]
-    }
+    "strict": true
   }
 }

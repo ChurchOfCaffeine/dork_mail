@@ -105,7 +105,7 @@
         </div>
       </div>
 
-      <div class="divider" />
+      <div class="divider"></div>
 
       <div class="body">
         {#if email.bodyHtml}
@@ -117,7 +117,7 @@
             srcdoc={email.bodyHtml}
             sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             on:load={onIframeLoad}
-          />
+          ></iframe>
         {:else}
           <pre class="text-body">{email.bodyText ?? "(no body)"}</pre>
         {/if}
@@ -171,6 +171,13 @@
     padding: 28px 32px;
     max-width: 860px;
     width: 100%;
+  }
+
+  @media (max-width: 599px) {
+    .content { padding: 16px; }
+    .subject { font-size: 17px; }
+    .actions { gap: 2px; }
+    .actions .btn { padding: 6px 8px; font-size: 13px; }
   }
 
   .subject {

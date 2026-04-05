@@ -73,7 +73,7 @@
       bind:value={body}
       placeholder="Write your message…"
       rows="20"
-    />
+    ></textarea>
   </div>
 </div>
 
@@ -99,6 +99,10 @@
     max-width: 860px;
     width: 100%;
     overflow-y: auto;
+  }
+
+  @media (max-width: 599px) {
+    .form { padding: 16px; }
   }
 
   .field {

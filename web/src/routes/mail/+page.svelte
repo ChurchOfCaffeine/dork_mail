@@ -93,15 +93,15 @@
   {:else if emails.length === 0}
     <div class="state-msg muted">No messages here.</div>
   {:else}
-    <ul class="email-list">
+    <div class="email-list">
       {#each emails as email (email.messageId)}
-        <li
+        <div
           class="email-row"
           class:unread={!email.read}
           on:click={() => openEmail(email.messageId)}
           on:keydown={(e) => e.key === "Enter" && openEmail(email.messageId)}
-          role="button"
           tabindex="0"
+          role="button"
         >
           <div class="row-left">
             <span class="from">{email.from.name ?? email.from.address}</span>
@@ -119,9 +119,9 @@
               <span class="attach-icon">📎</span>
             {/if}
           </div>
-        </li>
+        </div>
       {/each}
-    </ul>
+    </div>
 
     {#if nextCursor}
       <div class="load-more">
@@ -161,7 +161,6 @@
   .state-msg.muted { color: var(--text-muted); }
 
   .email-list {
-    list-style: none;
     overflow-y: auto;
     flex: 1;
   }
@@ -176,6 +175,19 @@
     cursor: pointer;
     transition: background 0.1s;
     color: var(--text-secondary);
+  }
+
+  @media (max-width: 599px) {
+    .email-row {
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto;
+      gap: 3px 8px;
+      padding: 10px 14px;
+    }
+    .row-left  { grid-column: 1; grid-row: 1; }
+    .row-right { grid-column: 2; grid-row: 1; }
+    .row-center { grid-column: 1 / -1; grid-row: 2; }
+    .preview { display: none; }
   }
   .email-row:hover { background: var(--bg-hover); }
   .email-row.unread {

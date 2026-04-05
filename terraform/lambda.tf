@@ -4,7 +4,7 @@
 # the initial stub is created.
 
 locals {
-  lambda_runtime = "nodejs20.x"
+  lambda_runtime = "nodejs24.x"
 
   lambda_env_common = {
     TABLE_NAME              = aws_dynamodb_table.main.name

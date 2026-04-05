@@ -35,7 +35,7 @@ await Promise.all(
       entryPoints: [`${root}/${entry}`],
       bundle: true,
       platform: "node",
-      target: "node20",
+      target: "node24",
       outfile: `${absOut}/${handler}.js`,
       external: [],        // bundle everything — no node_modules in Lambda zip
       minify: false,

@@ -12,6 +12,7 @@ const config = {
     alias: {
       $lib: "src/lib",
       $api: "src/lib/api",
+      "@dork-mail/shared": "../shared/src/index.ts",
     },
   },
 };
