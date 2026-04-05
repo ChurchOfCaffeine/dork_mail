@@ -115,7 +115,7 @@
             class="html-body"
             title="Email body"
             srcdoc={email.bodyHtml}
-            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
             on:load={onIframeLoad}
           ></iframe>
         {:else}

@@ -33,6 +33,7 @@ const ddb = DynamoDBDocumentClient.from(dynamo);
 
 const TABLE = process.env.TABLE_NAME!;
 const JWT_PARAM = process.env.JWT_SECRET_PARAM!;
+const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 const JWT_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -81,7 +82,7 @@ async function login(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult
     exp: now + JWT_TTL_SECONDS,
     isAdmin: user.isAdmin,
   };
-  const token = jwt.sign(payload, secret);
+  const token = jwt.sign(payload, secret, { algorithm: "HS256" });
 
   metrics.addMetric("LoginSuccess", MetricUnit.Count, 1);
   metrics.publishStoredMetrics();
@@ -226,7 +227,7 @@ function parseBody<T>(raw: string | null): T | null {
 function json(status: number, body: ApiResponse): APIGatewayProxyResult {
   return {
     statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
     body: JSON.stringify(body),
   };
 }

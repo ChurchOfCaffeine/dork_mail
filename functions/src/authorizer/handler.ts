@@ -25,7 +25,7 @@ export const handler = async (
 
   try {
     const secret = await getParameter(JWT_PARAM, { decrypt: true }) as string;
-    const payload = jwt.verify(token, secret) as AuthTokenPayload;
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AuthTokenPayload;
 
     logger.info("Authorized", { sub: payload.sub });
 

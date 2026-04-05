@@ -49,6 +49,7 @@ const sesv2 = tracer.captureAWSv3Client(new SESv2Client({}));
 const DOMAIN = process.env.MAIL_DOMAIN!;
 const HOSTED_ZONE_ID = process.env.HOSTED_ZONE_ID!;
 const SES_INBOUND_ENDPOINT = process.env.SES_INBOUND_ENDPOINT!;
+const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const isAdmin = event.requestContext.authorizer?.isAdmin === "true";
@@ -309,7 +310,7 @@ function parseBody<T>(raw: string | null): T | null {
 function json(status: number, body: ApiResponse): APIGatewayProxyResult {
   return {
     statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
     body: JSON.stringify(body),
   };
 }

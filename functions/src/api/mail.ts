@@ -38,6 +38,7 @@ const ses = tracer.captureAWSv3Client(new SESClient({}));
 const TABLE = process.env.TABLE_NAME!;
 const BUCKET = process.env.EMAIL_BUCKET!;
 const FROM_DOMAIN = process.env.FROM_DOMAIN!;
+const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const userEmail = event.requestContext.authorizer?.userEmail as string;
@@ -62,7 +63,14 @@ async function listEmails(event: APIGatewayProxyEvent, userEmail: string): Promi
   const qs = event.queryStringParameters ?? {};
   const folder = qs.folder ?? "inbox";
   const limit = Math.min(parseInt(qs.limit ?? "50", 10), 100);
-  const cursor = qs.cursor ? JSON.parse(Buffer.from(qs.cursor, "base64").toString()) : undefined;
+  let cursor: Record<string, unknown> | undefined;
+  if (qs.cursor) {
+    try {
+      cursor = JSON.parse(Buffer.from(qs.cursor, "base64").toString());
+    } catch {
+      return json(400, { ok: false, error: "Invalid cursor" });
+    }
+  }
 
   const result = await ddb.send(new QueryCommand({
     TableName: TABLE,
@@ -264,11 +272,16 @@ async function getAttachment(messageId: string, attachmentKey: string, userEmail
     ExpressionAttributeValues: { ":pk": `mailbox#${userEmail}`, ":mid": messageId },
   }));
 
-  if (!lookup.Items?.[0]) return json(404, { ok: false, error: "Not found" });
+  const emailItem = lookup.Items?.[0] as StoredEmail | undefined;
+  if (!emailItem) return json(404, { ok: false, error: "Not found" });
+
+  const decodedKey = decodeURIComponent(attachmentKey);
+  const allowed = (emailItem.attachments ?? []).some(a => a.s3Key === decodedKey);
+  if (!allowed) return json(403, { ok: false, error: "Forbidden" });
 
   const url = await getSignedUrl(
     s3,
-    new GetObjectCommand({ Bucket: BUCKET, Key: decodeURIComponent(attachmentKey) }),
+    new GetObjectCommand({ Bucket: BUCKET, Key: decodedKey }),
     { expiresIn: 300 }
   );
 
@@ -283,7 +296,7 @@ function parseBody<T>(raw: string | null): T | null {
 function json(status: number, body: ApiResponse): APIGatewayProxyResult {
   return {
     statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
     body: JSON.stringify(body),
   };
 }

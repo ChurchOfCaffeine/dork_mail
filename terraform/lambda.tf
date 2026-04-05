@@ -13,6 +13,7 @@ locals {
     HOSTED_ZONE_ID          = local.hosted_zone_id
     SES_INBOUND_EP          = local.ses_inbound_ep
     JWT_SECRET_PARAM        = aws_ssm_parameter.jwt_secret.name
+    WEB_ORIGIN              = "https://${local.web_fqdn}"
     POWERTOOLS_SERVICE_NAME = "dork-mail"
     LOG_LEVEL               = "INFO"
   }

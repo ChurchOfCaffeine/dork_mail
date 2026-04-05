@@ -111,6 +111,7 @@ resource "aws_iam_role_policy" "api_inline" {
           "dynamodb:UpdateItem",
           "dynamodb:DeleteItem",
           "dynamodb:Query",
+          "dynamodb:Scan",
         ]
         Resource = [
           aws_dynamodb_table.main.arn,
