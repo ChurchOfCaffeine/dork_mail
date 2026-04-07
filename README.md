@@ -4,9 +4,7 @@ A self-hosted email server for people who thought "how hard could it really be."
 
 Built on AWS SES, DynamoDB, and Lambda — fully serverless, no VMs, no mail transfer agents, no 3AM postfix debugging.
 
-You know how AWS sometimes offers a really useful managed service — custom domains, multiple mailboxes, just works — and then one day quietly announces it's being deprecated? And you're left wondering what you're supposed to do now, run your own mail server? Well. Yes. This costs pennies a month and you own every bit of it.
-
-> **Why "Dork Mail"?** Because only a dork responds to a deprecation notice by building their own mail server. We are those dorks.
+**Why "Dork Mail"?** Because only a dork responds to a deprecation notice by building their own mail server. We are those dorks.
 
 ---
 

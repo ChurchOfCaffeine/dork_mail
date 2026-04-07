@@ -27,13 +27,23 @@
 
   async function toggleStar() {
     if (!email) return;
+    const previousStarred = email.starred;
     email.starred = !email.starred;
-    await api.updateEmail(messageId, { starred: email.starred });
+    try {
+      await api.updateEmail(messageId, { starred: email.starred });
+    } catch (e) {
+      email.starred = previousStarred;
+      error = (e as Error).message || "Failed to update starred state.";
+    }
   }
 
   async function moveToTrash() {
-    await api.deleteEmail(messageId);
-    goto(`/mail?folder=${folder}`);
+    try {
+      await api.deleteEmail(messageId);
+      goto(`/mail?folder=${folder}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to move email to trash.";
+    }
   }
 
   async function reply() {
@@ -58,8 +68,8 @@
       img { height: auto !important; }
       pre { white-space: pre-wrap !important; }
     </style>`;
-    if (html.includes('<head>')) return html.replace('<head>', `<head>${style}`);
-    if (html.includes('<HEAD>')) return html.replace('<HEAD>', `<HEAD>${style}`);
+    const headRegex = /<head>/i;
+    if (headRegex.test(html)) return html.replace(headRegex, (match) => `${match}${style}`);
     return style + html;
   }
 
