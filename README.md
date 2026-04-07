@@ -15,37 +15,65 @@ You know how AWS sometimes offers a really useful managed service — custom dom
 - **Receives email** via SES receipt rules → stores raw `.eml` in S3 → parses and indexes into DynamoDB
 - **Sends email** via SES with full DKIM signing
 - **Web UI** — dark mode, Gmail-ish layout: inbox, compose, reply, attachments, labels, trash
-- **Setup wizard** — reads your Route 53 zone, identifies missing/incorrect DNS records (MX, SPF, DKIM, DMARC), and writes fixes with one click
-- **SES sandbox exit guide** — walks you through requesting production access so you can actually send mail to the world
-- **Multi-user** — multiple mailboxes on a single domain, admin-controlled user management
+- **Setup wizard** — reads your Route 53 zone, identifies missing/incorrect DNS records (MX, SPF, DKIM, DMARC), and writes fixes with one click; manages SES verified emails for sandbox testing; submits production access requests
+- **Multi-user** — multiple mailboxes on a single domain, admin-controlled user management panel
+- **Account settings** — users can update their display name and change their own password
 - **JWT auth** — simple, stateless, no Cognito
 
 ---
 
 ## Architecture
 
-```
-                    ┌─────────────┐
-  inbound mail ───▶ │     SES     │ receipt rule
-                    └──────┬──────┘
-                           │ S3 Put
-                    ┌──────▼──────┐        ┌─────────────────┐
-                    │  S3 bucket  │──────▶ │  email-ingest   │ Lambda
-                    │  (raw .eml) │        │  (MIME parser)  │
-                    └─────────────┘        └────────┬────────┘
-                                                    │ PutItem
-                                           ┌────────▼────────┐
-                                           │    DynamoDB     │
-                                           │  (single table) │
-                                           └────────▲────────┘
-                                                    │
-  browser ──▶ CloudFront ──▶ S3 (SvelteKit SPA)    │
-                    │                               │
-                    └──▶ API Gateway ──▶ Lambda ────┘
-                              │           (auth / mail / dns)
-                              │
-                         JWT authorizer
-                         Lambda → SSM
+```mermaid
+flowchart TD
+    subgraph Inbound["Inbound Mail"]
+        SES_IN[SES Receipt Rule]
+        S3_EMAIL[(S3\nraw .eml)]
+        INGEST[email-ingest\nLambda]
+    end
+
+    subgraph Storage["Storage"]
+        DYNAMO[(DynamoDB\nsingle table)]
+    end
+
+    subgraph Frontend["Frontend"]
+        CF[CloudFront]
+        S3_WEB[(S3\nweb assets)]
+        BROWSER[Browser]
+    end
+
+    subgraph API["API Layer"]
+        APIGW[API Gateway v2]
+        AUTHZ[authorizer Lambda\nJWT → SSM]
+        API_AUTH[api Lambda\nauth]
+        API_MAIL[api Lambda\nmail]
+        API_DNS[api Lambda\ndns / setup]
+    end
+
+    subgraph Outbound["Outbound Mail"]
+        SES_OUT[SES Send]
+    end
+
+    SES_IN -->|S3 Put| S3_EMAIL
+    S3_EMAIL -->|trigger| INGEST
+    INGEST -->|PutItem| DYNAMO
+
+    BROWSER -->|HTTPS| CF
+    CF -->|OAC| S3_WEB
+    CF -->|/api/*| APIGW
+
+    APIGW --> AUTHZ
+    AUTHZ -->|verify| SSM[(SSM\nJWT secret)]
+    APIGW --> API_AUTH
+    APIGW --> API_MAIL
+    APIGW --> API_DNS
+
+    API_AUTH <-->|users| DYNAMO
+    API_MAIL <-->|email index| DYNAMO
+    API_MAIL -->|send| SES_OUT
+    API_MAIL -->|presigned URL| S3_EMAIL
+    API_DNS <-->|records| R53[(Route 53)]
+    API_DNS <-->|domain status| SES_IN
 ```
 
 All AWS SDK calls use **IAM execution roles** — no access keys in any application code.
@@ -73,23 +101,26 @@ All AWS SDK calls use **IAM execution roles** — no access keys in any applicat
 dork-mail/
 ├── terraform/          # All AWS infrastructure — usable as a module
 ├── functions/          # Lambda functions (TypeScript + AWS Powertools)
-│   ├── src/
-│   │   ├── email-ingest/   # S3 trigger: raw email → DynamoDB
-│   │   ├── authorizer/     # JWT Lambda authorizer for API Gateway
-│   │   └── api/
-│   │       ├── auth.ts     # Login, user creation
-│   │       ├── mail.ts     # List, read, send, update, delete
-│   │       └── dns.ts      # DNS check, Route 53 apply, SES status
-│   └── scripts/
-│       └── bundle.mjs      # esbuild + zip bundler
+│   └── src/
+│       ├── email-ingest/   # S3 trigger: raw email → DynamoDB
+│       ├── authorizer/     # JWT Lambda authorizer for API Gateway
+│       └── api/
+│           ├── auth.ts     # Login, user CRUD (admin + self-service)
+│           ├── mail.ts     # List, read, send, update, delete, attachments
+│           └── dns.ts      # DNS check/apply, SES status, sandbox management
 ├── web/                # SvelteKit frontend (dark mode)
 │   └── src/routes/
 │       ├── login/
-│       ├── mail/           # Inbox, message view, compose
+│       ├── mail/           # Inbox, message view
+│       │   ├── [messageId]/    # Single message view
+│       │   ├── compose/        # Compose / reply
+│       │   ├── account/        # Account settings (display name, password)
+│       │   └── admin/users/    # Admin user management panel
 │       └── setup/          # DNS wizard
 ├── shared/             # Shared TypeScript types
 └── scripts/
-    └── publish-lambdas.sh  # Build + deploy Lambda code via update-function-code
+    ├── publish-lambdas.sh  # Build + deploy Lambda code via update-function-code
+    └── gen-password-hash.mjs  # Generate bcrypt hash for admin password
 ```
 
 ---
@@ -136,7 +167,7 @@ admin_display_name = "Your Name"
 admin_password_hash = "$2a$12$..."
 ```
 
-### 5. Apply infrastructure
+### 3. Apply infrastructure
 
 ```sh
 cd terraform
@@ -151,7 +182,7 @@ This will:
 - Wait for SES domain verification (this can take a few minutes)
 
 
-### 5. Deploy Lambda functions
+### 4. Deploy Lambda functions
 
 ```sh
 scripts/publish-lambdas.sh
@@ -161,7 +192,7 @@ This builds all handlers and pushes them directly to each Lambda function via `u
 
 Requires `jq` for the output formatting (`brew install jq` / `apt install jq`).
 
-### 6. Deploy the web app
+### 5. Deploy the web app
 
 ```sh
 pnpm build:web
@@ -171,7 +202,7 @@ aws cloudfront create-invalidation \
   --paths "/*"
 ```
 
-### 7. Done
+### 6. Done
 
 Open `https://mail.yourdomain.com`, log in with the admin credentials you set, and you'll land on the DNS wizard. If Terraform already applied your DNS records they should show green — if anything is yellow or red, click **Apply all fixes**.
 
@@ -181,12 +212,13 @@ Open `https://mail.yourdomain.com`, log in with the admin credentials you set, a
 
 New AWS accounts are in SES sandbox mode — you can only send mail to email addresses you've manually verified. To send to anyone:
 
-1. In AWS Console → **SES → Account Dashboard** → **Request production access**
-2. Select **Transactional** mail type
-3. Describe your use case (self-hosted mail server for your own domain)
-4. AWS typically approves within 24–48 hours
+1. In the setup wizard, use **Verified Emails** to add test addresses while in sandbox mode
+2. When ready, click **Request production access** in the wizard (or go to AWS Console → **SES → Account Dashboard** → **Request production access**)
+3. Select **Transactional** mail type
+4. Describe your use case (self-hosted mail server for your own domain)
+5. AWS typically approves within 24–48 hours
 
-The setup wizard in the web UI walks through this with instructions.
+The setup wizard walks through all of this with live status indicators.
 
 ---
 
@@ -246,9 +278,9 @@ scripts/publish-lambdas.sh
 
 ## Ongoing operations
 
-### Adding a user
+### Adding or managing users
 
-Log in as admin, go to the DNS wizard page — there's a user management section. Or via API:
+Log in as admin and go to **Admin → Users** in the sidebar. From there you can create users, change their admin status, or delete them. Or via API:
 
 ```sh
 curl -X POST https://mail.yourdomain.com/api/auth/users \
@@ -256,6 +288,12 @@ curl -X POST https://mail.yourdomain.com/api/auth/users \
   -H "Content-Type: application/json" \
   -d '{"email":"newuser@yourdomain.com","password":"...","displayName":"New User"}'
 ```
+
+Passwords must be at least 12 characters and include an uppercase letter, a digit, and a special character.
+
+### Account settings
+
+Any user can update their display name and change their own password from the **Account** page in the sidebar.
 
 ### Updating Lambda functions
 
@@ -317,6 +355,7 @@ pnpm dev
 - **Email HTML** is rendered in a sandboxed `<iframe>` with `sandbox="allow-same-origin"` to prevent script execution
 - **Attachment downloads** use short-lived (5 minute) S3 presigned URLs — no attachment bytes flow through Lambda
 - **User enumeration** is prevented — login returns the same error for unknown user and wrong password
+- **Password strength** enforced server-side: minimum 12 characters, must include uppercase, digit, and special character
 - SES **TLS required** for all outbound sending (configured in the SES configuration set)
 
 ---

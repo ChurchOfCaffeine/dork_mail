@@ -59,6 +59,33 @@ resource "aws_route53_record" "dmarc" {
   records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc@${var.domain}"]
 }
 
+# ─── Custom MAIL FROM domain ──────────────────────────────────────────────────
+# Makes the envelope sender (Return-Path) use bounces.{domain} instead of
+# the default amazonses.com address, so From and EnvelopeFrom share the same
+# organisational domain. This fixes HEADER_FROM_DIFFERENT_DOMAINS and gives
+# SPF a subdomain with a published record, fixing SPF_HELO_NONE.
+
+resource "aws_ses_domain_mail_from" "mail" {
+  domain           = aws_ses_domain_identity.mail.domain
+  mail_from_domain = "bounces.${var.domain}"
+}
+
+resource "aws_route53_record" "mail_from_mx" {
+  zone_id = local.hosted_zone_id
+  name    = "bounces.${var.domain}"
+  type    = "MX"
+  ttl     = 300
+  records = ["10 feedback-smtp.${var.aws_region}.amazonses.com"]
+}
+
+resource "aws_route53_record" "mail_from_spf" {
+  zone_id = local.hosted_zone_id
+  name    = "bounces.${var.domain}"
+  type    = "TXT"
+  ttl     = 300
+  records = ["v=spf1 include:amazonses.com ~all"]
+}
+
 # ─── SES Receipt Rules ────────────────────────────────────────────────────────
 
 resource "aws_ses_receipt_rule_set" "main" {

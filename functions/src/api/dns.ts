@@ -49,6 +49,7 @@ const sesv2 = tracer.captureAWSv3Client(new SESv2Client({}));
 const DOMAIN = process.env.MAIL_DOMAIN!;
 const HOSTED_ZONE_ID = process.env.HOSTED_ZONE_ID!;
 const SES_INBOUND_ENDPOINT = process.env.SES_INBOUND_ENDPOINT!;
+const AWS_REGION = process.env.AWS_REGION ?? "us-east-1";
 const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -79,6 +80,8 @@ async function checkDns(): Promise<APIGatewayProxyResult> {
   const spf = checkSpf(records);
   const dkim = await checkDkim(records);
   const dmarc = checkDmarc(records);
+  const mailFromMx = checkMailFromMx(records);
+  const mailFromSpf = checkMailFromSpf(records);
 
   const sesVer = await getSesVerification();
   const sesVerified = sesVer === "Success";
@@ -106,8 +109,22 @@ async function checkDns(): Promise<APIGatewayProxyResult> {
       ttl: 300, present: !!dmarc?.present, correct: false,
     });
   }
+  if (!mailFromMx || !mailFromMx.correct) {
+    issues.push({
+      type: "MX", name: `bounces.${DOMAIN}.`,
+      value: `10 feedback-smtp.${AWS_REGION}.amazonses.com`,
+      ttl: 300, present: !!mailFromMx?.present, correct: false,
+    });
+  }
+  if (!mailFromSpf || !mailFromSpf.correct) {
+    issues.push({
+      type: "TXT", name: `bounces.${DOMAIN}.`,
+      value: '"v=spf1 include:amazonses.com ~all"',
+      ttl: 300, present: !!mailFromSpf?.present, correct: false,
+    });
+  }
 
-  const result: DnsCheckResult = { domain: DOMAIN, mx, spf, dkim, dmarc, issues, sesVerified };
+  const result: DnsCheckResult = { domain: DOMAIN, mx, spf, dkim, dmarc, mailFromMx, mailFromSpf, issues, sesVerified };
   return json(200, { ok: true, data: result });
 }
 
@@ -283,6 +300,23 @@ async function checkDkim(records: ResourceRecordSet[]): Promise<DkimRecord[]> {
     const existing = records.find(r => r.Type === "CNAME" && r.Name === cname);
     return { type: "CNAME", name: cname, value: target, present: !!existing, correct: existing?.ResourceRecords?.[0]?.Value === target, selector: token };
   });
+}
+
+function checkMailFromMx(records: ResourceRecordSet[]): DnsRecord | null {
+  const rec = records.find(r => r.Type === "MX" && r.Name === `bounces.${DOMAIN}.`);
+  if (!rec) return null;
+  const value = rec.ResourceRecords?.[0]?.Value ?? "";
+  return { type: "MX", name: rec.Name!, value, ttl: rec.TTL, present: true, correct: value.toLowerCase().includes("feedback-smtp") && value.toLowerCase().includes("amazonses.com") };
+}
+
+function checkMailFromSpf(records: ResourceRecordSet[]): DnsRecord | null {
+  const rec = records.find(
+    r => r.Type === "TXT" && r.Name === `bounces.${DOMAIN}.` &&
+      r.ResourceRecords?.some(rr => rr.Value?.includes("v=spf1"))
+  );
+  if (!rec) return null;
+  const value = rec.ResourceRecords![0].Value!;
+  return { type: "TXT", name: rec.Name!, value, ttl: rec.TTL, present: true, correct: value.includes("include:amazonses.com") };
 }
 
 function checkDmarc(records: ResourceRecordSet[]): DnsRecord | null {

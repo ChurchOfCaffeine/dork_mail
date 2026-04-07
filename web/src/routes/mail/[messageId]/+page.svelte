@@ -12,11 +12,17 @@
   let messageId = $derived(page.params.messageId!);
   let folder = $derived(page.url.searchParams.get("folder") ?? "inbox");
 
-  $effect(() => {
+  $effect(async () => {
     loading = true;
     error = "";
     email = null;
-    api.getEmail(messageId).then(e => { email = e; }).catch(e => { error = (e as Error).message; }).finally(() => { loading = false; });
+    try {
+      email = await api.getEmail(messageId);
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      loading = false;
+    }
   });
 
   async function toggleStar() {
@@ -55,10 +61,6 @@
     if (html.includes('<head>')) return html.replace('<head>', `<head>${style}`);
     if (html.includes('<HEAD>')) return html.replace('<HEAD>', `<HEAD>${style}`);
     return style + html;
-  }
-
-  function onIframeLoad() {
-    // no-op: iframe fills available space via CSS
   }
 
   async function openAttachment(s3Key: string) {
@@ -123,8 +125,7 @@
               class="html-body"
               title="Email body"
               srcdoc={injectIframeStyles(email.bodyHtml)}
-              sandbox="allow-popups allow-popups-to-escape-sandbox"
-              onload={onIframeLoad}
+              sandbox="allow-popups"
             ></iframe>
           </div>
         {:else}

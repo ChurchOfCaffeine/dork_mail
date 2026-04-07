@@ -90,6 +90,10 @@ export interface DnsCheckResult {
   spf: DnsRecord | null;
   dkim: DkimRecord[];
   dmarc: DnsRecord | null;
+  /** MX record for the custom MAIL FROM subdomain (bounces.{domain}) */
+  mailFromMx: DnsRecord | null;
+  /** SPF record for the custom MAIL FROM subdomain (bounces.{domain}) */
+  mailFromSpf: DnsRecord | null;
   /** Records that are missing or incorrect — each is ready to apply as-is */
   issues: DnsRecord[];
   sesVerified: boolean;
