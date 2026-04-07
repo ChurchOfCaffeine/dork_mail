@@ -7,10 +7,18 @@
     "build:web": "pnpm --filter @dork-mail/web build",
     "build": "pnpm build:functions && pnpm build:web",
     "dev": "pnpm --filter @dork-mail/web dev",
-    "gen-password-hash": "node scripts/gen-password-hash.mjs"
+    "gen-password-hash": "node scripts/gen-password-hash.mjs",
+    "deploy:init": "tsx scripts/init-deploy-config.ts",
+    "deploy:functions": "tsx scripts/deploy-functions.ts",
+    "deploy:web": "tsx scripts/deploy-web.ts",
+    "deploy:all": "pnpm deploy:functions && pnpm deploy:web"
   },
   "devDependencies": {
-    "bcryptjs": "^3.0.3"
+    "@aws-sdk/client-cloudfront": "^3.1024.0",
+    "@aws-sdk/client-lambda": "^3.1024.0",
+    "@aws-sdk/client-s3": "^3.1024.0",
+    "bcryptjs": "^3.0.3",
+    "tsx": "^4.19.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"],

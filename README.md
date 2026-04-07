@@ -99,8 +99,8 @@ All AWS SDK calls use **IAM execution roles** — no access keys in any applicat
 
 ```
 dork-mail/
-├── terraform/          # All AWS infrastructure — usable as a module
-├── functions/          # Lambda functions (TypeScript + AWS Powertools)
+├── terraform/              # All AWS infrastructure — intended for use as a module
+├── functions/              # Lambda functions (TypeScript + AWS Powertools)
 │   └── src/
 │       ├── email-ingest/   # S3 trigger: raw email → DynamoDB
 │       ├── authorizer/     # JWT Lambda authorizer for API Gateway
@@ -108,7 +108,7 @@ dork-mail/
 │           ├── auth.ts     # Login, user CRUD (admin + self-service)
 │           ├── mail.ts     # List, read, send, update, delete, attachments
 │           └── dns.ts      # DNS check/apply, SES status, sandbox management
-├── web/                # SvelteKit frontend (dark mode)
+├── web/                    # SvelteKit frontend (dark mode)
 │   └── src/routes/
 │       ├── login/
 │       ├── mail/           # Inbox, message view
@@ -117,10 +117,14 @@ dork-mail/
 │       │   ├── account/        # Account settings (display name, password)
 │       │   └── admin/users/    # Admin user management panel
 │       └── setup/          # DNS wizard
-├── shared/             # Shared TypeScript types
-└── scripts/
-    ├── publish-lambdas.sh  # Build + deploy Lambda code via update-function-code
-    └── gen-password-hash.mjs  # Generate bcrypt hash for admin password
+├── shared/                 # Shared TypeScript types
+├── scripts/
+│   ├── deploy-functions.ts     # Deploy Lambda code via update-function-code
+│   ├── deploy-web.ts           # S3 sync + CloudFront invalidation for the web app
+│   ├── init-deploy-config.ts   # Write deploy.json from terraform output
+│   └── gen-password-hash.mjs   # Generate bcrypt hash for admin password
+├── deploy.example.json     # Example deploy.json (the real one is gitignored)
+└── deploy.json             # Your deploy config — gitignored, generated from terraform output
 ```
 
 ---
@@ -128,9 +132,10 @@ dork-mail/
 ## Prerequisites
 
 - An AWS account
-- A domain with a Route 53 hosted zone already set up (the zone just needs to exist — Terraform handles the email DNS records)
-- AWS CLI configured with credentials **for the human running Terraform** (this is the only place credentials are needed)
-- Node.js 20+
+- A domain with a Route 53 hosted zone already set up (Terraform handles the email DNS records — the zone just needs to exist)
+- AWS CLI configured with credentials **for the person running Terraform** (this is the only place credentials are needed)
+- Node.js 22+
+- pnpm
 - Terraform 1.7+
 
 SES email receiving is only available in `us-east-1`, `us-west-2`, and `eu-west-1`. Pick one.
@@ -139,72 +144,82 @@ SES email receiving is only available in `us-east-1`, `us-west-2`, and `eu-west-
 
 ## Deployment
 
+The `terraform/` directory is designed to be used as a **module** from your own Terraform root — not applied in-place. This keeps your secrets and state management separate from this repo.
+
 ### 1. Install dependencies
 
 ```sh
 pnpm install
 ```
 
-### 2. Configure Terraform
+### 2. Add dork-mail to your Terraform root
 
-```sh
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-```
-
-Edit `terraform.tfvars`:
+In your own Terraform configuration:
 
 ```hcl
-domain = "yourdomain.com"    # must have a Route 53 hosted zone in this account
+module "dork_mail" {
+  source = "github.com/you/dork-mail//terraform?ref=main"
 
-# Generate: openssl rand -base64 48
-jwt_secret = "..."
+  domain              = "yourdomain.com"
+  jwt_secret          = var.jwt_secret          # openssl rand -base64 48
+  admin_email         = "you@yourdomain.com"
+  admin_password_hash = var.admin_password_hash  # pnpm gen-password-hash
+  admin_display_name  = "Your Name"
+}
 
-admin_email        = "you@yourdomain.com"
-admin_display_name = "Your Name"
+# Re-export the deploy config so the deploy scripts can read it
+output "deploy_config" {
+  value = module.dork_mail.deploy_config
+}
 
-# Generate the bcrypt hash:
-#   pnpm gen-password-hash
-admin_password_hash = "$2a$12$..."
+output "web_url" {
+  value = module.dork_mail.web_url
+}
+```
+
+Generate the admin password hash before applying:
+
+```sh
+pnpm gen-password-hash
 ```
 
 ### 3. Apply infrastructure
 
 ```sh
-cd terraform
+cd your-terraform-root
 terraform init
 terraform apply
 ```
 
-This will:
-- Create all AWS resources
-- Write MX, SPF, DKIM (3 CNAME records), and DMARC to your Route 53 zone
-- Provision the CloudFront distribution at `mail.yourdomain.com`
-- Wait for SES domain verification (this can take a few minutes)
+This creates all AWS resources, writes DNS records to your Route 53 zone, provisions the CloudFront distribution at `mail.yourdomain.com`, and stores the JWT secret in SSM.
 
-
-### 4. Deploy Lambda functions
+### 4. Write deploy.json
 
 ```sh
-scripts/publish-lambdas.sh
+cd your-terraform-root
+terraform output -raw deploy_config > /path/to/dork-mail/deploy.json
 ```
 
-This builds all handlers and pushes them directly to each Lambda function via `update-function-code`. Terraform created the functions with a stub handler — this replaces it with the real code.
-
-Requires `jq` for the output formatting (`brew install jq` / `apt install jq`).
-
-### 5. Deploy the web app
+Or from inside this repo if your Terraform root is elsewhere:
 
 ```sh
-pnpm build:web
-aws s3 sync web/build s3://$(terraform -chdir=terraform output -raw web_bucket) --delete
-aws cloudfront create-invalidation \
-  --distribution-id $(terraform -chdir=terraform output -raw cloudfront_distribution_id) \
-  --paths "/*"
+pnpm deploy:all:init --tf-dir /path/to/your-terraform-root
 ```
+
+This is a one-time step. `deploy.json` is gitignored — see `deploy.example.json` for its shape.
+
+### 5. Build and deploy
+
+```sh
+pnpm build
+pnpm deploy:all
+```
+
+`pnpm build` compiles the Lambda functions and the web app. `pnpm deploy:all` pushes the Lambda zips via `update-function-code` and syncs the web app to S3, then invalidates CloudFront.
 
 ### 6. Done
 
-Open `https://mail.yourdomain.com`, log in with the admin credentials you set, and you'll land on the DNS wizard. If Terraform already applied your DNS records they should show green — if anything is yellow or red, click **Apply all fixes**.
+Open `https://mail.yourdomain.com`, log in with your admin credentials, and you'll land on the DNS wizard. If Terraform already wrote your DNS records they should show green — if anything is yellow or red, click **Apply all fixes**.
 
 ---
 
@@ -222,40 +237,14 @@ The setup wizard walks through all of this with live status indicators.
 
 ---
 
-## Using as a Terraform module
+## Module reference
 
-The `terraform/` directory is a standalone module. You can source it from another repo without cloning this one — just make sure the Lambda zips are already in S3 first.
-
-```hcl
-module "dork_mail" {
-  source = "github.com/you/dork-mail//terraform?ref=v1.0.0"
-
-  domain              = "yourdomain.com"
-  jwt_secret          = var.jwt_secret
-  admin_email         = "you@yourdomain.com"
-  admin_password_hash = var.admin_password_hash
-}
-
-output "mail_url" {
-  value = module.dork_mail.web_url
-}
-```
-
-After `terraform apply`, deploy the real Lambda code from a clone of this repo:
-
-```sh
-git clone https://github.com/you/dork-mail
-cd dork-mail
-pnpm install
-scripts/publish-lambdas.sh
-```
-
-### Module inputs
+### Inputs
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `domain` | yes | — | Mail domain, e.g. `example.com` |
-| `jwt_secret` | yes | — | JWT signing secret (goes to SSM SecureString) |
+| `jwt_secret` | yes | — | JWT signing secret (stored in SSM SecureString) |
 | `admin_email` | yes | — | Initial admin user email |
 | `admin_password_hash` | yes | — | bcrypt hash of admin password |
 | `admin_display_name` | no | `Admin` | Display name for admin user |
@@ -264,23 +253,37 @@ scripts/publish-lambdas.sh
 | `ses_rule_set_name` | no | `dork-mail` | SES receipt rule set name |
 | `tags` | no | `{}` | Tags applied to all resources |
 
-### Module outputs
+### Outputs
 
 | Output | Description |
 |---|---|
+| `deploy_config` | JSON blob consumed by the deploy scripts. Pipe to `deploy.json` after apply. |
 | `web_url` | URL of the web UI |
-| `api_endpoint` | Raw API Gateway endpoint |
-| `dynamo_table` | DynamoDB table name |
-| `email_bucket` | S3 bucket for raw emails |
-| `cloudfront_distribution_id` | For cache invalidations on deploy |
+| `ses_verification_status` | Helper command to check SES domain verification status |
 
 ---
 
 ## Ongoing operations
 
+### Redeploying after code changes
+
+```sh
+pnpm build
+pnpm deploy:all
+```
+
+No `terraform apply` needed for code-only changes — Terraform ignores function code after initial creation.
+
+To redeploy just one layer:
+
+```sh
+pnpm deploy:all:functions   # Lambda only
+pnpm deploy:all:web         # S3 + CloudFront only
+```
+
 ### Adding or managing users
 
-Log in as admin and go to **Admin → Users** in the sidebar. From there you can create users, change their admin status, or delete them. Or via API:
+Log in as admin and go to **Admin → Users** in the sidebar. Or via API:
 
 ```sh
 curl -X POST https://mail.yourdomain.com/api/auth/users \
@@ -294,22 +297,6 @@ Passwords must be at least 12 characters and include an uppercase letter, a digi
 ### Account settings
 
 Any user can update their display name and change their own password from the **Account** page in the sidebar.
-
-### Updating Lambda functions
-
-```sh
-scripts/publish-lambdas.sh
-```
-
-No `terraform apply` needed for code-only changes — Terraform ignores function code after initial creation.
-
-### Updating the web app
-
-```sh
-pnpm build:web
-aws s3 sync web/build s3://your-web-bucket --delete
-aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
-```
 
 ---
 

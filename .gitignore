@@ -1,4 +1,5 @@
 node_modules/
+deploy.json
 .svelte-kit/
 .env
 .env.local

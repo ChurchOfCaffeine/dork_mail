@@ -1,0 +1,12 @@
+{
+  "region": "us-east-1",
+  "functions": {
+    "email-ingest": "dork-mail-email-ingest",
+    "authorizer": "dork-mail-authorizer",
+    "api-auth": "dork-mail-api-auth",
+    "api-mail": "dork-mail-api-mail",
+    "api-dns": "dork-mail-api-dns"
+  },
+  "web_bucket": "dork-mail-web-123456789012",
+  "cloudfront_distribution": "EXXXXXXXXXXXX"
+}
