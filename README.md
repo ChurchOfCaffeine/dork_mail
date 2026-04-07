@@ -4,7 +4,7 @@ A self-hosted email server for people who thought "how hard could it really be."
 
 Built on AWS SES, DynamoDB, and Lambda — fully serverless, no VMs, no mail transfer agents, no 3AM postfix debugging.
 
-**Why "Dork Mail"?** Because only a dork responds to a deprecation notice by building their own mail server. We are those dorks.
+**Why Dork Mail?** Because only a dork responds to a deprecation notice ([cough cough](https://docs.aws.amazon.com/workmail/latest/adminguide/workmail-end-of-support.html)) by building their own mail server. We are those dorks.
 
 ---
 
