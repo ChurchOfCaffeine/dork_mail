@@ -17,6 +17,16 @@
     "overrides": {
       "cookie": ">=0.7.0",
       "serialize-javascript": ">=7.0.5"
+    },
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "vite-plugin-pwa>vite": "8"
+      }
+    },
+    "allowedDeprecatedVersions": {
+      "sourcemap-codec": "1.4.8",
+      "source-map": "0.8.0-beta.0",
+      "glob": "10.5.0 || 11.1.0"
     }
   }
 }

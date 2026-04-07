@@ -1,23 +1,29 @@
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import * as api from "$lib/api/client";
   import type { EmailAddress } from "@dork-mail/shared";
 
-  // Pre-fill from query params (used by reply)
-  $: toParam = $page.url.searchParams.get("to") ?? "";
-  $: subjectParam = $page.url.searchParams.get("subject") ?? "";
-  $: replyToParam = $page.url.searchParams.get("replyTo") ?? undefined;
+  // Capture initial URL params once — intentionally not reactive after mount
+  const replyToParam: string | undefined = page.url.searchParams.get("replyTo") ?? undefined;
 
-  let to = toParam;
-  let cc = "";
-  let subject = subjectParam;
-  let body = "";
-  let sending = false;
-  let error = "";
+  let to = $state(page.url.searchParams.get("to") ?? "");
+  let cc = $state("");
+  let subject = $state(page.url.searchParams.get("subject") ?? "");
+  let body = $state("");
+  let sending = $state(false);
+  let error = $state("");
+
+  const emailInput = typeof document !== "undefined" ? document.createElement("input") : null;
+  if (emailInput) emailInput.type = "email";
+  function isValidEmail(addr: string): boolean {
+    if (!emailInput) return true; // SSR fallback — server validates
+    emailInput.value = addr;
+    return emailInput.checkValidity();
+  }
 
   function parseAddresses(raw: string): EmailAddress[] {
-    return raw.split(",").map(s => s.trim()).filter(Boolean).map(address => ({ address }));
+    return raw.split(",").map(s => s.trim()).filter(s => isValidEmail(s)).map(address => ({ address }));
   }
 
   async function send() {
@@ -43,9 +49,9 @@
 
 <div class="compose-page">
   <header class="toolbar">
-    <button class="btn btn-ghost" on:click={() => history.back()}>← Discard</button>
+    <button class="btn btn-ghost" onclick={() => history.back()}>← Discard</button>
     <h2>New Message</h2>
-    <button class="btn btn-primary" on:click={send} disabled={sending}>
+    <button class="btn btn-primary" onclick={send} disabled={sending}>
       {sending ? "Sending…" : "Send →"}
     </button>
   </header>

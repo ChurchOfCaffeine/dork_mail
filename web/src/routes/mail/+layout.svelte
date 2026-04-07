@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { auth } from "$lib/stores/auth";
+  import { auth } from "$lib/stores/auth.svelte";
   import { goto, afterNavigate } from "$app/navigation";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
 
   const folders = [
     { id: "inbox",  label: "Inbox",  icon: "⊡" },
@@ -11,8 +11,9 @@
     { id: "spam",   label: "Spam",   icon: "⚑" },
   ];
 
-  let sidebarOpen = false;
-  let collapsed = false;
+  let { children } = $props();
+  let sidebarOpen = $state(false);
+  let collapsed = $state(false);
 
   // Close mobile overlay on navigation
   afterNavigate(() => { sidebarOpen = false; });
@@ -22,14 +23,14 @@
     goto("/login");
   }
 
-  $: activeFolder = $page.url.searchParams.get("folder") ?? "inbox";
+  let activeFolder = $derived(page.url.searchParams.get("folder") ?? "inbox");
 </script>
 
 <!-- Mobile top bar (hidden on desktop) -->
 <header class="mobile-topbar">
   <button
     class="hamburger"
-    on:click={() => (sidebarOpen = !sidebarOpen)}
+    onclick={() => (sidebarOpen = !sidebarOpen)}
     aria-label="Toggle navigation"
     aria-expanded={sidebarOpen}
   >
@@ -43,8 +44,7 @@
 
 <!-- Mobile backdrop -->
 {#if sidebarOpen}
-  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-  <div class="backdrop" on:click={() => (sidebarOpen = false)}></div>
+  <div class="backdrop" role="presentation" onclick={() => (sidebarOpen = false)} onkeydown={() => (sidebarOpen = false)}></div>
 {/if}
 
 <div class="shell">
@@ -55,7 +55,7 @@
       {/if}
       <button
         class="collapse-btn btn btn-ghost"
-        on:click={() => (collapsed = !collapsed)}
+        onclick={() => (collapsed = !collapsed)}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={collapsed ? "Expand" : "Collapse"}
       >
@@ -87,7 +87,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      {#if $auth.isAdmin}
+      {#if auth.isAdmin}
         <a
           href="/mail/admin/users"
           class="btn btn-ghost setup-btn"
@@ -115,17 +115,17 @@
       </a>
       <div class="user-area">
         {#if !collapsed}
-          <span class="user-email">{$auth.email}</span>
-          <button class="btn btn-ghost signout-btn" on:click={signOut}>Sign out</button>
+          <span class="user-email">{auth.email}</span>
+          <button class="btn btn-ghost signout-btn" onclick={signOut}>Sign out</button>
         {:else}
-          <button class="btn btn-ghost signout-icon" on:click={signOut} title="Sign out">⏻</button>
+          <button class="btn btn-ghost signout-icon" onclick={signOut} title="Sign out">⏻</button>
         {/if}
       </div>
     </div>
   </aside>
 
   <main class="main">
-    <slot />
+    {@render children()}
   </main>
 </div>
 
@@ -293,10 +293,11 @@
   @media (max-width: 767px) {
     .mobile-topbar {
       display: flex;
-      align-items: flex-end;
+      align-items: center;
       gap: 10px;
       height: calc(52px + env(safe-area-inset-top));
       padding: env(safe-area-inset-top) 12px 0;
+      padding-bottom: 10px;
       background: var(--bg-surface);
       border-bottom: 1px solid var(--border);
       position: fixed;
@@ -321,6 +322,7 @@
 
     .shell {
       padding-top: calc(52px + env(safe-area-inset-top));
+      padding-bottom: env(safe-area-inset-bottom);
       height: 100dvh;
     }
 

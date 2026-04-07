@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onMount } from "svelte";
   import * as api from "$lib/api/client";
   import type { StoredEmail } from "@dork-mail/shared";
 
-  let emails: StoredEmail[] = [];
-  let loading = true;
-  let error = "";
-  let nextCursor: string | undefined;
-  let loadingMore = false;
-  let emptyingTrash = false;
+  let emails = $state<StoredEmail[]>([]);
+  let loading = $state(true);
+  let error = $state("");
+  let nextCursor = $state<string | undefined>(undefined);
+  let loadingMore = $state(false);
+  let emptyingTrash = $state(false);
 
-  $: folder = $page.url.searchParams.get("folder") ?? "inbox";
-  $: folder, load();
+  let folder = $derived(page.url.searchParams.get("folder") ?? "inbox");
+
+  $effect(() => { load(); });
 
   async function load() {
     loading = true;
@@ -77,9 +77,9 @@
   <header class="toolbar">
     <h2 class="folder-title">{folder.charAt(0).toUpperCase() + folder.slice(1)}</h2>
     <div class="toolbar-actions">
-      <button class="btn btn-ghost" on:click={load} disabled={loading} title="Refresh">↺</button>
+      <button class="btn btn-ghost" onclick={load} disabled={loading} title="Refresh">↺</button>
       {#if folder === "trash" && emails.length > 0}
-        <button class="btn btn-ghost danger" on:click={emptyTrash} disabled={emptyingTrash}>
+        <button class="btn btn-ghost danger" onclick={emptyTrash} disabled={emptyingTrash}>
           {emptyingTrash ? "Deleting…" : "Empty Trash"}
         </button>
       {/if}
@@ -98,8 +98,8 @@
         <div
           class="email-row"
           class:unread={!email.read}
-          on:click={() => openEmail(email.messageId)}
-          on:keydown={(e) => e.key === "Enter" && openEmail(email.messageId)}
+          onclick={() => openEmail(email.messageId)}
+          onkeydown={(e) => e.key === "Enter" && openEmail(email.messageId)}
           tabindex="0"
           role="button"
         >
@@ -125,7 +125,7 @@
 
     {#if nextCursor}
       <div class="load-more">
-        <button class="btn btn-ghost" on:click={loadMore} disabled={loadingMore}>
+        <button class="btn btn-ghost" onclick={loadMore} disabled={loadingMore}>
           {loadingMore ? "Loading…" : "Load more"}
         </button>
       </div>

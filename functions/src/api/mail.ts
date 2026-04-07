@@ -25,6 +25,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import type { StoredEmail, SendEmailRequest, ListEmailsResponse, ApiResponse } from "@dork-mail/shared";
+import isEmail from "validator/lib/isEmail";
 
 const logger = new Logger({ serviceName: "api-mail" });
 const tracer = new Tracer({ serviceName: "api-mail" });
@@ -37,8 +38,26 @@ const ses = tracer.captureAWSv3Client(new SESClient({}));
 
 const TABLE = process.env.TABLE_NAME!;
 const BUCKET = process.env.EMAIL_BUCKET!;
-const FROM_DOMAIN = process.env.FROM_DOMAIN!;
 const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
+
+const ALLOWED_FOLDERS = ["inbox", "sent", "draft", "trash", "spam"] as const;
+
+function isValidEmail(addr: string): boolean {
+  return isEmail(addr);
+}
+
+/** Strip CR/LF to prevent email header injection */
+function noNewlines(s: string): string {
+  return s.replace(/[\r\n]/g, "");
+}
+
+function formatAddress(a: { name?: string; address: string }): string {
+  if (a.name) {
+    const safeName = noNewlines(a.name).replace(/"/g, '\\"');
+    return `"${safeName}" <${a.address}>`;
+  }
+  return a.address;
+}
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const userEmail = event.requestContext.authorizer?.userEmail as string;
@@ -62,6 +81,9 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 async function listEmails(event: APIGatewayProxyEvent, userEmail: string): Promise<APIGatewayProxyResult> {
   const qs = event.queryStringParameters ?? {};
   const folder = qs.folder ?? "inbox";
+  if (!(ALLOWED_FOLDERS as readonly string[]).includes(folder)) {
+    return json(400, { ok: false, error: "Invalid folder" });
+  }
   const limit = Math.min(parseInt(qs.limit ?? "50", 10), 100);
   let cursor: Record<string, unknown> | undefined;
   if (qs.cursor) {
@@ -134,6 +156,20 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     return json(400, { ok: false, error: "to and subject required" });
   }
 
+  if (body.subject.length > 256) {
+    return json(400, { ok: false, error: "subject must be 256 characters or fewer" });
+  }
+
+  const allRecipients = [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])];
+  if (!allRecipients.every(a => isValidEmail(a.address))) {
+    return json(400, { ok: false, error: "Invalid email address in to, cc, or bcc" });
+  }
+
+  // Validate replyToMessageId: must not contain header-injection chars or angle brackets
+  if (body.replyToMessageId && /[\r\n<>]/.test(body.replyToMessageId)) {
+    return json(400, { ok: false, error: "Invalid replyToMessageId" });
+  }
+
   // Look up display name so From shows "Name <email>" instead of bare address
   const userRecord = await ddb.send(new GetCommand({
     TableName: TABLE,
@@ -141,17 +177,19 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
   }));
   const displayName = (userRecord.Item as User | undefined)?.displayName;
   const fromAddress = displayName
-    ? `"${displayName.replace(/"/g, '\\"')}" <${userEmail}>`
+    ? `"${noNewlines(displayName).replace(/"/g, '\\"')}" <${userEmail}>`
     : userEmail;
 
-  const toAddresses = body.to.map(a => a.name ? `"${a.name.replace(/"/g, '\\"')}" <${a.address}>` : a.address);
-  const ccAddresses = (body.cc ?? []).map(a => a.name ? `"${a.name.replace(/"/g, '\\"')}" <${a.address}>` : a.address);
+  const toAddresses = body.to.map(formatAddress);
+  const ccAddresses = (body.cc ?? []).map(formatAddress);
+  const bccAddresses = (body.bcc ?? []).map(formatAddress);
 
   const res = await ses.send(new SendEmailCommand({
     Source: fromAddress,
     Destination: {
       ToAddresses: toAddresses,
       CcAddresses: ccAddresses.length ? ccAddresses : undefined,
+      BccAddresses: bccAddresses.length ? bccAddresses : undefined,
     },
     Message: {
       Subject: { Data: body.subject, Charset: "UTF-8" },
@@ -160,7 +198,7 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
         Html: body.bodyHtml ? { Data: body.bodyHtml, Charset: "UTF-8" } : undefined,
       },
     },
-    ReplyToAddresses: body.replyToMessageId ? [`<${body.replyToMessageId}>`] : undefined,
+    ReplyToAddresses: body.replyToMessageId ? [body.replyToMessageId] : undefined,
   }));
 
   // Store in sent folder
@@ -174,6 +212,7 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     from: { address: userEmail, name: displayName },
     to: body.to,
     cc: body.cc,
+    bcc: body.bcc,
     subject: body.subject,
     bodyText: body.bodyText,
     bodyHtml: body.bodyHtml,
@@ -220,7 +259,13 @@ async function updateEmail(
   if (body.read !== undefined) { sets.push("#read = :read"); names["#read"] = "read"; values[":read"] = body.read; }
   if (body.starred !== undefined) { sets.push("starred = :starred"); values[":starred"] = body.starred; }
   if (body.labels !== undefined) { sets.push("labels = :labels"); values[":labels"] = body.labels; }
-  if (body.folder !== undefined) { sets.push("folder = :folder"); values[":folder"] = body.folder; }
+  if (body.folder !== undefined) {
+    if (!(ALLOWED_FOLDERS as readonly string[]).includes(body.folder)) {
+      return json(400, { ok: false, error: "Invalid folder" });
+    }
+    sets.push("folder = :folder");
+    values[":folder"] = body.folder;
+  }
 
   if (!sets.length) return json(400, { ok: false, error: "Nothing to update" });
 

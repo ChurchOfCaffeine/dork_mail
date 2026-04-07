@@ -1,26 +1,22 @@
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { onMount } from "svelte";
   import * as api from "$lib/api/client";
   import type { StoredEmail } from "@dork-mail/shared";
 
-  let email: StoredEmail | null = null;
-  let loading = true;
-  let error = "";
-  let iframeEl: HTMLIFrameElement;
+  let email = $state<StoredEmail | null>(null);
+  let loading = $state(true);
+  let error = $state("");
+  let iframeEl = $state<HTMLIFrameElement | undefined>(undefined);
 
-  $: messageId = $page.params.messageId;
-  $: folder = $page.url.searchParams.get("folder") ?? "inbox";
+  let messageId = $derived(page.params.messageId!);
+  let folder = $derived(page.url.searchParams.get("folder") ?? "inbox");
 
-  onMount(async () => {
-    try {
-      email = await api.getEmail(messageId);
-    } catch (e) {
-      error = (e as Error).message;
-    } finally {
-      loading = false;
-    }
+  $effect(() => {
+    loading = true;
+    error = "";
+    email = null;
+    api.getEmail(messageId).then(e => { email = e; }).catch(e => { error = (e as Error).message; }).finally(() => { loading = false; });
   });
 
   async function toggleStar() {
@@ -48,6 +44,19 @@
     });
   }
 
+  function injectIframeStyles(html: string): string {
+    const style = `<style>
+      html { overflow-x: hidden !important; }
+      body { max-width: 100% !important; overflow-x: hidden !important; word-break: break-word; background: #f9f9f9 !important; }
+      img, table, td, th, div, p, span { max-width: 100% !important; box-sizing: border-box !important; }
+      img { height: auto !important; }
+      pre { white-space: pre-wrap !important; }
+    </style>`;
+    if (html.includes('<head>')) return html.replace('<head>', `<head>${style}`);
+    if (html.includes('<HEAD>')) return html.replace('<HEAD>', `<HEAD>${style}`);
+    return style + html;
+  }
+
   function onIframeLoad() {
     if (!iframeEl?.contentDocument) return;
     const h = iframeEl.contentDocument.documentElement.scrollHeight;
@@ -62,16 +71,16 @@
 
 <div class="email-view">
   <header class="toolbar">
-    <button class="btn btn-ghost back" on:click={() => goto(`/mail?folder=${folder}`)}>
+    <button class="btn btn-ghost back" onclick={() => goto(`/mail?folder=${folder}`)}>
       ← Back
     </button>
     {#if email}
       <div class="actions">
-        <button class="btn btn-ghost" on:click={reply}>↩ Reply</button>
-        <button class="btn btn-ghost" on:click={toggleStar}>
+        <button class="btn btn-ghost" onclick={reply}>↩ Reply</button>
+        <button class="btn btn-ghost" onclick={toggleStar}>
           {email.starred ? "★ Unstar" : "☆ Star"}
         </button>
-        <button class="btn btn-ghost danger" on:click={moveToTrash}>⌫ Trash</button>
+        <button class="btn btn-ghost danger" onclick={moveToTrash}>⌫ Trash</button>
       </div>
     {/if}
   </header>
@@ -110,14 +119,16 @@
       <div class="body">
         {#if email.bodyHtml}
           <!-- Email HTML is sandboxed in an iframe to prevent script execution -->
-          <iframe
-            bind:this={iframeEl}
-            class="html-body"
-            title="Email body"
-            srcdoc={email.bodyHtml}
-            sandbox="allow-popups allow-popups-to-escape-sandbox"
-            on:load={onIframeLoad}
-          ></iframe>
+          <div class="html-body-wrap">
+            <iframe
+              bind:this={iframeEl}
+              class="html-body"
+              title="Email body"
+              srcdoc={injectIframeStyles(email.bodyHtml)}
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
+              onload={onIframeLoad}
+            ></iframe>
+          </div>
         {:else}
           <pre class="text-body">{email.bodyText ?? "(no body)"}</pre>
         {/if}
@@ -129,9 +140,9 @@
           <ul>
             {#each email.attachments as att}
               <li>
-                <button class="btn btn-ghost attachment-btn" on:click={() => openAttachment(att.s3Key)}>
+                <button class="btn btn-ghost attachment-btn" onclick={() => openAttachment(att.s3Key)}>
                   📎 {att.filename}
-                  <span class="size">({Math.round(att.size / 1024)} KB)</span>
+                  <span class="size">({Math.ceil(att.size / 1024)} KB)</span>
                 </button>
               </li>
             {/each}
@@ -198,13 +209,19 @@
   .label { color: var(--text-muted); width: 40px; flex-shrink: 0; }
 
   .body { margin-top: 16px; }
+  .html-body-wrap {
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #f9f9f9;
+  }
   .html-body {
     width: 100%;
     min-height: 200px;
     border: none;
-    background: #fff;
-    border-radius: var(--radius-sm);
+    background: transparent;
     display: block;
+    overflow: hidden;
   }
   .text-body {
     white-space: pre-wrap;

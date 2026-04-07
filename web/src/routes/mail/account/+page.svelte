@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { auth } from "$lib/stores/auth";
+  import { auth } from "$lib/stores/auth.svelte";
   import * as api from "$lib/api/client";
 
-  let displayName = $auth.displayName ?? "";
-  let currentPassword = "";
-  let newPassword = "";
-  let confirmPassword = "";
+  let displayName = $state(auth.displayName ?? "");
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let confirmPassword = $state("");
 
-  let profileMsg = "";
-  let profileError = "";
-  let profileSaving = false;
+  let profileMsg = $state("");
+  let profileError = $state("");
+  let profileSaving = $state(false);
 
-  let pwMsg = "";
-  let pwError = "";
-  let pwSaving = false;
+  let pwMsg = $state("");
+  let pwError = $state("");
+  let pwSaving = $state(false);
 
   async function saveProfile() {
     if (!displayName.trim()) { profileError = "Display name cannot be empty."; return; }
     profileError = ""; profileMsg = ""; profileSaving = true;
     try {
-      await api.updateUser($auth.email!, { displayName: displayName.trim() });
+      await api.updateUser(auth.email!, { displayName: displayName.trim() });
       auth.updateDisplayName(displayName.trim());
       profileMsg = "Display name updated.";
     } catch (e) {
@@ -35,7 +35,7 @@
     if (newPassword !== confirmPassword) { pwError = "Passwords do not match."; return; }
     pwError = ""; pwMsg = ""; pwSaving = true;
     try {
-      await api.updateUser($auth.email!, { currentPassword, newPassword });
+      await api.updateUser(auth.email!, { currentPassword, newPassword });
       pwMsg = "Password changed.";
       currentPassword = ""; newPassword = ""; confirmPassword = "";
     } catch (e) {
@@ -53,7 +53,7 @@
     <h2>Profile</h2>
     <div class="field">
       <label for="email">Email</label>
-      <input id="email" type="email" value={$auth.email ?? ""} disabled />
+      <input id="email" type="email" value={auth.email ?? ""} disabled />
     </div>
     <div class="field">
       <label for="displayName">Display name</label>
@@ -62,7 +62,7 @@
     </div>
     {#if profileMsg}<p class="success">{profileMsg}</p>{/if}
     {#if profileError}<p class="error">{profileError}</p>{/if}
-    <button class="btn btn-primary" on:click={saveProfile} disabled={profileSaving}>
+    <button class="btn btn-primary" onclick={saveProfile} disabled={profileSaving}>
       {profileSaving ? "Saving…" : "Save"}
     </button>
   </section>
@@ -83,7 +83,7 @@
     </div>
     {#if pwMsg}<p class="success">{pwMsg}</p>{/if}
     {#if pwError}<p class="error">{pwError}</p>{/if}
-    <button class="btn btn-primary" on:click={changePassword} disabled={pwSaving}>
+    <button class="btn btn-primary" onclick={changePassword} disabled={pwSaving}>
       {pwSaving ? "Saving…" : "Change password"}
     </button>
   </section>

@@ -1,38 +1,42 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import * as api from "$lib/api/client";
-  import { auth } from "$lib/stores/auth";
+  import { auth } from "$lib/stores/auth.svelte";
   import type { DnsCheckResult } from "@dork-mail/shared";
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
-  let dns: DnsCheckResult | null = null;
-  let sesStatus: { verificationStatus: string; dkim: any; inSandbox: boolean; quota: { max24Hour: number; maxSendRate: number; sentLast24Hours: number } } | null = null;
-  let verifiedEmails: { email: string; status: string }[] = [];
+  let dns = $state<DnsCheckResult | null>(null);
+  let sesStatus = $state<{ verificationStatus: string; dkim: any; inSandbox: boolean; quota: { max24Hour: number; maxSendRate: number; sentLast24Hours: number }; productionReview?: { status: string; caseId?: string } | null } | null>(null);
+  let verifiedEmails = $state<{ email: string; status: string }[]>([]);
 
-  let loading = true;
-  let error = "";
-  let applying = false;
-  let applyMsg = "";
-  let verifying = false;
+  let loading = $state(true);
+  let error = $state("");
+  let applying = $state(false);
+  let applyMsg = $state("");
+  let verifying = $state(false);
 
-  let newEmail = "";
-  let addingEmail = false;
-  let addEmailMsg = "";
-  let addEmailError = "";
+  let newEmail = $state("");
+  let addingEmail = $state(false);
+  let addEmailMsg = $state("");
+  let addEmailError = $state("");
 
-  let verifyingSelf = false;
-  let selfVerifyMsg = "";
+  let verifyingSelf = $state(false);
+  let selfVerifyMsg = $state("");
 
-  let prodWebsiteUrl = "";
-  let prodUseCase = "";
-  let requestingProd = false;
-  let prodMsg = "";
-  let prodError = "";
+  let prodWebsiteUrl = $state("");
+  let prodUseCase = $state("");
+  let requestingProd = $state(false);
+  let prodMsg = $state("");
+  let prodError = $state("");
 
-  $: selfIdentity = verifiedEmails.find(e => e.email === $auth.email);
+  let selfIdentity = $derived(verifiedEmails.find(e => e.email === auth.email));
 
-  onMount(load);
+  $effect(() => {
+    if (!auth.isAdmin) goto("/mail");
+  });
+
+  $effect(() => { load(); });
 
   async function load() {
     loading = true;
@@ -84,10 +88,10 @@
   }
 
   async function verifySelf() {
-    if (!$auth.email) return;
+    if (!auth.email) return;
     verifyingSelf = true; selfVerifyMsg = "";
     try {
-      await api.addVerifiedEmail($auth.email);
+      await api.addVerifiedEmail(auth.email);
       selfVerifyMsg = "Verification email sent — check your inbox and click the link.";
       await load();
     } catch (e) {
@@ -126,7 +130,7 @@
 <div class="setup-page">
   <header class="page-header">
     <h1>Setup & DNS Wizard</h1>
-    <button class="btn btn-ghost" on:click={load} disabled={loading}>↺ Refresh</button>
+    <button class="btn btn-ghost" onclick={load} disabled={loading}>↺ Refresh</button>
   </header>
 
   {#if loading}
@@ -199,7 +203,7 @@
             {#if prodError}<p class="err">{prodError}</p>{/if}
             <button
               class="btn btn-primary"
-              on:click={requestProductionAccess}
+              onclick={requestProductionAccess}
               disabled={requestingProd || !prodWebsiteUrl || !prodUseCase}
             >
               {requestingProd ? "Submitting…" : "Request production access"}
@@ -233,17 +237,17 @@
         {/if}
       </div>
 
-      <div class="identity-email">{$auth.email}</div>
+      <div class="identity-email">{auth.email}</div>
 
       {#if selfIdentity?.status === "Success"}
         <p class="identity-ok-msg">Your email is verified. You can send and receive emails in sandbox mode.</p>
       {:else if selfIdentity}
         <p class="hint">A verification email was sent to your inbox. Click the link inside to complete verification, then refresh this page.</p>
-        <button class="btn btn-ghost sm" on:click={verifySelf} disabled={verifyingSelf}>
+        <button class="btn btn-ghost sm" onclick={verifySelf} disabled={verifyingSelf}>
           {verifyingSelf ? "Sending…" : "Resend verification email"}
         </button>
       {:else}
-        <button class="btn btn-primary" on:click={verifySelf} disabled={verifyingSelf}>
+        <button class="btn btn-primary" onclick={verifySelf} disabled={verifyingSelf}>
           {verifyingSelf ? "Sending…" : "Send verification email to my inbox"}
         </button>
       {/if}
@@ -261,9 +265,9 @@
             type="email"
             bind:value={newEmail}
             placeholder="recipient@example.com"
-            on:keydown={(e) => e.key === "Enter" && addEmail()}
+            onkeydown={(e) => e.key === "Enter" && addEmail()}
           />
-          <button class="btn btn-primary" on:click={addEmail} disabled={addingEmail || !newEmail}>
+          <button class="btn btn-primary" onclick={addEmail} disabled={addingEmail || !newEmail}>
             {addingEmail ? "Sending…" : "Send verification"}
           </button>
         </div>
@@ -276,7 +280,7 @@
               <li class="email-row">
                 <span class="email-addr">{e.email}</span>
                 <span class="email-status" style="color: {statusColor(e.status)}">{e.status}</span>
-                <button class="btn btn-ghost remove-btn" on:click={() => removeEmail(e.email)}>✕</button>
+                <button class="btn btn-ghost remove-btn" onclick={() => removeEmail(e.email)}>✕</button>
               </li>
             {/each}
           </ul>
@@ -295,7 +299,7 @@
           {sesStatus?.verificationStatus ?? "Unknown"}
         </span>
         {#if sesStatus?.verificationStatus !== "Success"}
-          <button class="btn btn-ghost sm" on:click={triggerVerify} disabled={verifying}>
+          <button class="btn btn-ghost sm" onclick={triggerVerify} disabled={verifying}>
             {verifying ? "…" : "Re-trigger"}
           </button>
         {/if}
@@ -324,7 +328,7 @@
           {/each}
         </ul>
         {#if applyMsg}<p class="success">{applyMsg}</p>{/if}
-        <button class="btn btn-primary" on:click={applyAll} disabled={applying}>
+        <button class="btn btn-primary" onclick={applyAll} disabled={applying}>
           {applying ? "Applying…" : `Apply ${dns.issues.length} fix(es) to Route 53`}
         </button>
       </section>

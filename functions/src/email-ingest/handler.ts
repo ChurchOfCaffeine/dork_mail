@@ -12,6 +12,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { simpleParser } from "mailparser";
 import type { StoredEmail, EmailAddress, Attachment } from "@dork-mail/shared";
+import isEmail from "validator/lib/isEmail";
 
 const logger = new Logger({ serviceName: "email-ingest" });
 const tracer = new Tracer({ serviceName: "email-ingest" });
@@ -24,7 +25,6 @@ const ddb = DynamoDBDocumentClient.from(dynamo, {
 });
 
 const TABLE = process.env.TABLE_NAME!;
-const BUCKET = process.env.EMAIL_BUCKET!;
 
 export const handler = async (event: S3Event): Promise<void> => {
   for (const record of event.Records) {
@@ -48,13 +48,16 @@ async function ingestOne(bucket: string, key: string): Promise<void> {
   const toAddresses = toEmailAddresses(parsed.to);
   const ccAddresses = toEmailAddresses(parsed.cc);
 
-  const attachments: Attachment[] = (parsed.attachments ?? []).map((a, i) => ({
-    filename: a.filename ?? `attachment-${i}`,
-    contentType: a.contentType,
-    size: a.size,
-    // Terraform will configure the actual attachment prefix
-    s3Key: `attachments/${messageId}/${a.filename ?? i}`,
-  }));
+  const attachments: Attachment[] = (parsed.attachments ?? []).map((a, i) => {
+    const rawName = a.filename ?? `attachment-${i}`;
+    const safeName = rawName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    return {
+      filename: rawName,
+      contentType: a.contentType,
+      size: a.size,
+      s3Key: `attachments/${messageId}/${safeName}`,
+    };
+  });
 
   // Write one record per recipient mailbox so each inbox query is simple
   for (const recipient of toAddresses) {
@@ -91,9 +94,8 @@ function toEmailAddresses(input: unknown): EmailAddress[] {
   // mailparser gives AddressObject | AddressObject[]
   const objs = Array.isArray(input) ? input : [input];
   return objs.flatMap((obj: any) =>
-    (obj?.value ?? []).map((v: any) => ({
-      address: v.address ?? "",
-      name: v.name || undefined,
-    }))
+    (obj?.value ?? [])
+      .map((v: any) => ({ address: (v.address ?? "").toLowerCase().trim(), name: v.name || undefined }))
+      .filter((a: EmailAddress) => isEmail(a.address))
   );
 }

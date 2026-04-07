@@ -1,12 +1,12 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth";
+  import { auth } from "$lib/stores/auth.svelte";
   import * as api from "$lib/api/client";
 
-  let email = "";
-  let password = "";
-  let error = "";
-  let loading = false;
+  let email = $state("");
+  let password = $state("");
+  let error = $state("");
+  let loading = $state(false);
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -29,7 +29,7 @@
     <h1>Dork Mail</h1>
     <p class="subtitle">Sign in to your mailbox</p>
 
-    <form on:submit={submit}>
+    <form onsubmit={submit}>
       <label>
         <span>Email</span>
         <input type="email" bind:value={email} autocomplete="email" required />

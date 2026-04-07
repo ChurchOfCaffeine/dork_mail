@@ -1,32 +1,29 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth";
+  import { auth } from "$lib/stores/auth.svelte";
   import * as api from "$lib/api/client";
   import type { UserPublic } from "@dork-mail/shared";
 
   // Redirect non-admins
-  if (!$auth.isAdmin) goto("/mail");
+  if (!auth.isAdmin) goto("/mail");
 
-  let users: UserPublic[] = [];
-  let loading = true;
-  let loadError = "";
+  let users = $state<UserPublic[]>([]);
+  let loading = $state(true);
+  let loadError = $state("");
 
-  // New user form
-  let newEmail = "";
-  let newDisplayName = "";
-  let newPassword = "";
-  let newIsAdmin = false;
-  let creating = false;
-  let createError = "";
-  let createMsg = "";
+  let newEmail = $state("");
+  let newDisplayName = $state("");
+  let newPassword = $state("");
+  let newIsAdmin = $state(false);
+  let creating = $state(false);
+  let createError = $state("");
+  let createMsg = $state("");
 
-  // Per-user action state
-  let actionError: Record<string, string> = {};
-  let toggling: Record<string, boolean> = {};
-  let deleting: Record<string, boolean> = {};
+  let actionError = $state<Record<string, string>>({});
+  let toggling = $state<Record<string, boolean>>({});
+  let deleting = $state<Record<string, boolean>>({});
 
-  onMount(load);
+  $effect(() => { load(); });
 
   async function load() {
     loading = true; loadError = "";
@@ -99,18 +96,18 @@
               <div class="user-info">
                 <span class="user-name">{user.displayName}</span>
                 <span class="user-email">{user.email}</span>
-                {#if user.email === $auth.email}
+                {#if user.email === auth.email}
                   <span class="badge badge-self">you</span>
                 {/if}
                 {#if user.isAdmin}
                   <span class="badge badge-admin">admin</span>
                 {/if}
               </div>
-              {#if user.email !== $auth.email}
+              {#if user.email !== auth.email}
                 <div class="user-actions">
                   <button
                     class="btn btn-ghost btn-sm"
-                    on:click={() => toggleAdmin(user)}
+                    onclick={() => toggleAdmin(user)}
                     disabled={toggling[user.email]}
                     title={user.isAdmin ? "Remove admin" : "Make admin"}
                   >
@@ -118,7 +115,7 @@
                   </button>
                   <button
                     class="btn btn-ghost btn-sm btn-danger"
-                    on:click={() => deleteUser(user)}
+                    onclick={() => deleteUser(user)}
                     disabled={deleting[user.email]}
                   >
                     {deleting[user.email] ? "…" : "Delete"}
@@ -157,7 +154,7 @@
     </label>
     {#if createMsg}<p class="success">{createMsg}</p>{/if}
     {#if createError}<p class="error">{createError}</p>{/if}
-    <button class="btn btn-primary" on:click={createUser} disabled={creating}>
+    <button class="btn btn-primary" onclick={createUser} disabled={creating}>
       {creating ? "Creating…" : "Create user"}
     </button>
   </section>

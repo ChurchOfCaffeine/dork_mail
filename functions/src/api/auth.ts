@@ -34,7 +34,15 @@ const ddb = DynamoDBDocumentClient.from(dynamo);
 const TABLE = process.env.TABLE_NAME!;
 const JWT_PARAM = process.env.JWT_SECRET_PARAM!;
 const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
-const JWT_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const JWT_TTL_SECONDS = 60 * 60 * 24; // 1 day
+
+/** Minimum 12 chars, at least one uppercase, one digit, one special char */
+function isStrongPassword(pwd: string): boolean {
+  return pwd.length >= 12
+    && /[A-Z]/.test(pwd)
+    && /[0-9]/.test(pwd)
+    && /[^A-Za-z0-9]/.test(pwd);
+}
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const path = event.path;
@@ -101,6 +109,10 @@ async function createUser(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
   const body = parseBody<{ email: string; password: string; displayName: string }>(event.body);
   if (!body?.email || !body?.password || !body?.displayName) {
     return json(400, { ok: false, error: "email, password, displayName required" });
+  }
+
+  if (!isStrongPassword(body.password)) {
+    return json(400, { ok: false, error: "Password must be at least 12 characters and include uppercase, digit, and special character" });
   }
 
   const email = body.email.toLowerCase().trim();
@@ -174,6 +186,9 @@ async function updateUser(event: APIGatewayProxyEvent, targetEmail: string): Pro
   }
 
   if (body.newPassword !== undefined) {
+    if (!isStrongPassword(body.newPassword)) {
+      return json(400, { ok: false, error: "Password must be at least 12 characters and include uppercase, digit, and special character" });
+    }
     if (isSelf && !callerIsAdmin) {
       // Non-admin updating their own password must provide current password
       if (!body.currentPassword) return json(400, { ok: false, error: "currentPassword required" });
