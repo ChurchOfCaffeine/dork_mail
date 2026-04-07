@@ -58,9 +58,7 @@
   }
 
   function onIframeLoad() {
-    if (!iframeEl?.contentDocument) return;
-    const h = iframeEl.contentDocument.documentElement.scrollHeight;
-    iframeEl.style.height = `${h}px`;
+    // no-op: iframe fills available space via CSS
   }
 
   async function openAttachment(s3Key: string) {
@@ -154,7 +152,7 @@
 </div>
 
 <style>
-  .email-view { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+  .email-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 
   .toolbar {
     display: flex;
@@ -178,7 +176,10 @@
 
   .content {
     flex: 1;
-    overflow-y: auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     padding: 28px 32px;
     max-width: 860px;
     width: 100%;
@@ -208,20 +209,25 @@
   .meta-row { display: flex; gap: 12px; font-size: 13px; color: var(--text-secondary); }
   .label { color: var(--text-muted); width: 40px; flex-shrink: 0; }
 
-  .body { margin-top: 16px; }
+  .body { margin-top: 16px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .html-body-wrap {
     border-radius: var(--radius);
     overflow: hidden;
     border: 1px solid var(--border);
     background: #f9f9f9;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .html-body {
     width: 100%;
-    min-height: 200px;
+    flex: 1;
+    min-height: 0;
     border: none;
     background: transparent;
     display: block;
-    overflow: hidden;
+    overflow: auto;
   }
   .text-body {
     white-space: pre-wrap;

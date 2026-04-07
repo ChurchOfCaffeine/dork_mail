@@ -115,7 +115,7 @@
       </a>
       <div class="user-area">
         {#if !collapsed}
-          <span class="user-email">{auth.email}</span>
+          <span class="user-email">{auth.displayName ?? auth.email}</span>
           <button class="btn btn-ghost signout-btn" onclick={signOut}>Sign out</button>
         {:else}
           <button class="btn btn-ghost signout-icon" onclick={signOut} title="Sign out">⏻</button>
@@ -337,6 +337,7 @@
       transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       /* Reset collapsed width on mobile */
       min-width: 270px;
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     .sidebar.open {
@@ -347,7 +348,7 @@
     .sidebar.collapsed { width: 270px; }
 
     .sidebar .sidebar-head {
-      padding: 20px 16px 12px;
+      padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
       justify-content: flex-start;
     }
 
@@ -355,7 +356,7 @@
     .collapse-btn { display: none; }
 
     /* Restore full sidebar appearance on mobile regardless of collapsed state */
-    .sidebar.collapsed .sidebar-head { justify-content: flex-start; padding: 20px 16px 12px; }
+    .sidebar.collapsed .sidebar-head { justify-content: flex-start; padding: calc(env(safe-area-inset-top) + 12px) 16px 12px; }
     .sidebar.collapsed .compose-btn { width: auto; padding: 8px 12px; margin: 0 8px 16px; }
     .sidebar.collapsed .folder-link { justify-content: flex-start; padding: 9px 16px; }
     .sidebar.collapsed .setup-btn { justify-content: flex-start; }

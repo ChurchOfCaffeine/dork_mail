@@ -71,6 +71,25 @@
   function openEmail(messageId: string) {
     goto(`/mail/${encodeURIComponent(messageId)}?folder=${folder}`);
   }
+
+  // Silent background refresh — prepend new emails without resetting the list
+  async function silentRefresh() {
+    try {
+      const res = await api.listEmails(folder);
+      const existingIds = new Set(emails.map(e => e.messageId));
+      const fresh = res.emails.filter(e => !existingIds.has(e.messageId));
+      if (fresh.length) emails = [...fresh, ...emails];
+    } catch {
+      // ignore — don't surface background errors
+    }
+  }
+
+  $effect(() => {
+    // Re-register interval whenever folder changes
+    void folder;
+    const id = setInterval(silentRefresh, 60_000);
+    return () => clearInterval(id);
+  });
 </script>
 
 <div class="inbox">
