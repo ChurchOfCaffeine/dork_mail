@@ -121,16 +121,16 @@
 <div class="email-view">
   <header class="toolbar">
     <button class="btn btn-ghost icon-btn" onclick={() => goto(`/mail?folder=${folder}`)}>
-      &#8592; Back
+      ← Back
     </button>
     {#if email}
       <div class="actions">
-        <button class="btn btn-ghost icon-btn" onclick={reply} title="Reply">&#8617; Reply</button>
+        <button class="btn btn-ghost icon-btn" onclick={reply} title="Reply">↩ Reply</button>
         <button class="btn btn-ghost icon-btn" onclick={toggleStar} title={email.starred ? "Unstar" : "Star"}>
           <span class:starred={email.starred}>{email.starred ? "★" : "☆"}</span>
           {email.starred ? "Unstar" : "Star"}
         </button>
-        <button class="btn btn-ghost icon-btn danger" onclick={moveToTrash} title="Trash">&#9003; Trash</button>
+        <button class="btn btn-ghost icon-btn danger" onclick={moveToTrash} title="Trash">✕ Trash</button>
       </div>
     {/if}
   </header>
@@ -208,7 +208,7 @@
           <div class="attachment-grid">
             {#each email.attachments as att}
               <button class="attachment-chip" onclick={() => openAttachment(att.s3Key)}>
-                <span class="att-icon">&#128206;</span>
+                <span class="att-icon">📎</span>
                 <span class="att-name">{att.filename}</span>
                 <span class="att-size">{Math.ceil(att.size / 1024)} KB</span>
               </button>

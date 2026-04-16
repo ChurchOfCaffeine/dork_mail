@@ -6,14 +6,24 @@ interface AuthState {
 }
 
 /** Decode JWT payload without verifying signature — server always re-verifies */
-function jwtIsAdmin(token: string): boolean {
+function decodeJwt(token: string): { isAdmin?: boolean; exp?: number } | null {
   try {
     const payload = token.split(".")[1];
-    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    return decoded.isAdmin === true;
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
   } catch {
-    return false;
+    return null;
   }
+}
+
+function jwtIsAdmin(token: string): boolean {
+  return decodeJwt(token)?.isAdmin === true;
+}
+
+/** Check if the token is expired (client-side pre-check; server is authoritative) */
+function jwtIsExpired(token: string): boolean {
+  const exp = decodeJwt(token)?.exp;
+  if (typeof exp !== "number") return false;
+  return Date.now() >= exp * 1000;
 }
 
 function getInitial(): AuthState {
@@ -21,6 +31,13 @@ function getInitial(): AuthState {
     return { token: null, email: null, displayName: null, isAdmin: false };
   }
   const token = localStorage.getItem("token");
+  // Clear expired tokens eagerly so the UI doesn't treat us as authenticated
+  if (token && jwtIsExpired(token)) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userEmail");
+    localStorage.removeItem("displayName");
+    return { token: null, email: null, displayName: null, isAdmin: false };
+  }
   return {
     token,
     email: localStorage.getItem("userEmail"),

@@ -18,6 +18,17 @@ function token(): string | null {
   return typeof localStorage !== "undefined" ? localStorage.getItem("token") : null;
 }
 
+function clearAuthAndRedirect() {
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem("token");
+    localStorage.removeItem("userEmail");
+    localStorage.removeItem("displayName");
+  }
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -36,13 +47,22 @@ async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  const data: ApiResponse<T> = await res.json();
+  // API Gateway authorizer rejects expired/invalid tokens with 401 or 403
+  // and returns a raw { message } body, not our ApiResponse shape. Treat
+  // both as auth failures — don't surface as a generic error in the UI.
+  if (!noAuth && (res.status === 401 || res.status === 403)) {
+    clearAuthAndRedirect();
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  let data: ApiResponse<T>;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`HTTP ${res.status}`);
+  }
 
   if (!data.ok) {
-    if (res.status === 401) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
-    }
     throw new Error(data.error ?? `HTTP ${res.status}`);
   }
 

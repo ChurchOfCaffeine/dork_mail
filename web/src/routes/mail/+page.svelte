@@ -422,8 +422,8 @@
                 <span class="from">
                   {email.from.name ?? email.from.address}
                 </span>
-                {#if email.starred}<span class="star" title="Starred">&#9733;</span>{/if}
-                {#if email.attachments?.length}<span class="attach-badge" title="Has attachments">&#128206;</span>{/if}
+                {#if email.starred}<span class="star" title="Starred">★</span>{/if}
+                {#if email.attachments?.length}<span class="attach-badge" title="Has attachments">📎</span>{/if}
                 <span class="date">{formatDate(email.receivedAt)}</span>
               </div>
               <div class="row-bottom">
@@ -440,22 +440,25 @@
                 class="action-btn"
                 onclick={(e) => toggleRead(e, email)}
                 title={email.read ? "Mark unread" : "Mark read"}
+                aria-label={email.read ? "Mark unread" : "Mark read"}
               >
-                {email.read ? "&#9711;" : "&#9679;"}
+                <span class="action-icon">{email.read ? "○" : "●"}</span>
               </button>
               <button
                 class="action-btn"
                 onclick={(e) => toggleStar(e, email)}
                 title={email.starred ? "Unstar" : "Star"}
+                aria-label={email.starred ? "Unstar" : "Star"}
               >
-                {email.starred ? "&#9733;" : "&#9734;"}
+                <span class="action-icon" class:starred={email.starred}>{email.starred ? "★" : "☆"}</span>
               </button>
               <button
                 class="action-btn danger"
                 onclick={(e) => trashEmail(e, email)}
                 title="Delete"
+                aria-label="Delete"
               >
-                &#9003;
+                <span class="action-icon">✕</span>
               </button>
             </div>
           </div>
@@ -505,14 +508,14 @@
         <!-- Toolbar -->
         <header class="detail-toolbar">
           <div class="detail-toolbar-left">
-            <button class="btn btn-ghost icon-btn" onclick={detailReply} title="Reply">&#8617;</button>
+            <button class="btn btn-ghost icon-btn" onclick={detailReply} title="Reply" aria-label="Reply">↩</button>
             <span class="toolbar-divider"></span>
-            <button class="btn btn-ghost icon-btn" onclick={detailToggleStar} title={selectedEmail.starred ? "Unstar" : "Star"}>
+            <button class="btn btn-ghost icon-btn" onclick={detailToggleStar} title={selectedEmail.starred ? "Unstar" : "Star"} aria-label={selectedEmail.starred ? "Unstar" : "Star"}>
               <span class:starred={selectedEmail.starred}>{selectedEmail.starred ? "★" : "☆"}</span>
             </button>
-            <button class="btn btn-ghost icon-btn danger" onclick={detailMoveToTrash} title="Move to trash">&#9003;</button>
+            <button class="btn btn-ghost icon-btn danger" onclick={detailMoveToTrash} title="Move to trash" aria-label="Move to trash">✕</button>
           </div>
-          <button class="btn btn-ghost icon-btn" onclick={closePanel} title="Close">&#10005;</button>
+          <button class="btn btn-ghost icon-btn" onclick={closePanel} title="Close" aria-label="Close">✕</button>
         </header>
 
         <!-- Email content -->
@@ -559,7 +562,7 @@
               <div class="attachment-grid">
                 {#each selectedEmail.attachments as att}
                   <button class="attachment-chip" onclick={() => openAttachment(att.s3Key)}>
-                    <span class="att-icon">&#128206;</span>
+                    <span class="att-icon">📎</span>
                     <span class="att-name">{att.filename}</span>
                     <span class="att-size">{Math.ceil(att.size / 1024)} KB</span>
                   </button>
@@ -795,14 +798,24 @@
   .email-row:hover .hover-actions { display: flex; }
 
   .action-btn {
-    padding: 4px 8px;
-    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     color: var(--text-secondary);
     border-radius: var(--radius-sm);
     line-height: 1;
   }
   .action-btn:hover { background: var(--bg-raised); color: var(--text-primary); }
   .action-btn.danger:hover { color: var(--danger); }
+  .action-icon {
+    font-size: 14px;
+    line-height: 1;
+    display: inline-block;
+  }
+  .action-icon.starred { color: var(--warning); }
 
   .load-more { padding: 16px; text-align: center; }
 
