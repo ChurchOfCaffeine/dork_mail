@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { EmailAddress } from "@dork-mail/shared";
-  import { initials, avatarHue } from "$lib/util/format";
+  import { initials, avatarHue } from "#lib/util/format.ts";
 
   let { address, size = 40 }: { address: EmailAddress; size?: number } = $props();
 </script>

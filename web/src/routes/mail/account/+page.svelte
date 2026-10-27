@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { prefs, type ThemePref } from "$lib/stores/prefs.svelte";
-  import { toasts } from "$lib/stores/toast.svelte";
-  import * as api from "$lib/api/client";
-  import PageHeader from "$lib/components/PageHeader.svelte";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import { prefs, type ThemePref } from "#lib/stores/prefs.svelte.ts";
+  import { toasts } from "#lib/stores/toast.svelte.ts";
+  import * as api from "#lib/api/client.ts";
+  import PageHeader from "#lib/components/PageHeader.svelte";
 
   let displayName = $state(auth.displayName ?? "");
   let currentPassword = $state("");

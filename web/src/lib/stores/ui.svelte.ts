@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 
 const mobileQuery = browser ? matchMedia("(max-width: 767px)") : null;
 

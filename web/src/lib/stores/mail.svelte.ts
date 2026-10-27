@@ -1,10 +1,10 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { goto } from "$app/navigation";
-import * as api from "$lib/api/client";
+import * as api from "#lib/api/client.ts";
 import { MAIL_FOLDERS } from "@dork-mail/shared";
 import type { EmailSummary, StoredEmail, MailFolder, UnreadCounts, SendEmailRequest } from "@dork-mail/shared";
 import { toasts } from "./toast.svelte";
-import { rememberContacts } from "./contacts";
+import { rememberContacts } from "./contacts.ts";
 
 interface FolderState {
   emails: EmailSummary[];

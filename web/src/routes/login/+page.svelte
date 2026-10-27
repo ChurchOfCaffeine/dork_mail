@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth.svelte";
-  import * as api from "$lib/api/client";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import * as api from "#lib/api/client.ts";
 
   let email = $state("");
   let password = $state("");
@@ -9,7 +9,7 @@
   let loading = $state(false);
 
   $effect(() => {
-    if (auth.isAuthenticated) goto("/mail", { replaceState: true });
+    if (auth.isAuthenticated) goto("/mail", { replace: true });
   });
 
   async function submit(e: SubmitEvent) {
@@ -19,7 +19,7 @@
     try {
       const res = await api.login(email.trim(), password);
       auth.login(res.token, res.email, res.displayName, res.isAdmin);
-      goto("/mail", { replaceState: true });
+      goto("/mail", { replace: true });
     } catch (err) {
       error = (err as Error).message === "Invalid credentials" ? "That email and password don't match." : (err as Error).message;
       password = "";

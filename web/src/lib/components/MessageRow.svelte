@@ -2,7 +2,7 @@
   import type { EmailSummary } from "@dork-mail/shared";
   import Icon, { type IconName } from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
-  import { shortDate, displayName } from "$lib/util/format";
+  import { shortDate, displayName } from "#lib/util/format.ts";
 
   export interface SwipeAction { icon: IconName; label: string; color: string }
 

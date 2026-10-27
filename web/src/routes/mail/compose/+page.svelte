@@ -3,13 +3,13 @@
   import { page } from "$app/state";
   import { goto, afterNavigate } from "$app/navigation";
   import type { EmailAddress, OutgoingAttachment, StoredEmail } from "@dork-mail/shared";
-  import * as api from "$lib/api/client";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { mail } from "$lib/stores/mail.svelte";
-  import { toasts } from "$lib/stores/toast.svelte";
-  import { fullDate, formatAddress, fileSize, htmlToText } from "$lib/util/format";
-  import Icon from "$lib/components/Icon.svelte";
-  import RecipientInput, { isValidAddress } from "$lib/components/RecipientInput.svelte";
+  import * as api from "#lib/api/client.ts";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import { mail } from "#lib/stores/mail.svelte.ts";
+  import { toasts } from "#lib/stores/toast.svelte.ts";
+  import { fullDate, formatAddress, fileSize, htmlToText } from "#lib/util/format.ts";
+  import Icon from "#lib/components/Icon.svelte";
+  import RecipientInput, { isValidAddress } from "#lib/components/RecipientInput.svelte";
 
   type Mode = "new" | "reply" | "replyAll" | "forward";
 
@@ -164,7 +164,7 @@
 
   function leave() {
     if (cameFromApp) history.back();
-    else goto("/mail", { replaceState: true });
+    else goto("/mail", { replace: true });
   }
 
   function closeKeepDraft() {

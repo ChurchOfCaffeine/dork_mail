@@ -6,13 +6,13 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { MAIL_FOLDERS, type EmailSummary, type MailFolder } from "@dork-mail/shared";
-  import { mail, folderActions, FOLDER_LABELS, type FolderAction } from "$lib/stores/mail.svelte";
-  import { ui, isTyping } from "$lib/stores/ui.svelte";
-  import { toasts } from "$lib/stores/toast.svelte";
-  import { dateGroup } from "$lib/util/format";
-  import Icon from "$lib/components/Icon.svelte";
-  import MessageRow from "$lib/components/MessageRow.svelte";
-  import MessageView from "$lib/components/MessageView.svelte";
+  import { mail, folderActions, FOLDER_LABELS, type FolderAction } from "#lib/stores/mail.svelte.ts";
+  import { ui, isTyping } from "#lib/stores/ui.svelte.ts";
+  import { toasts } from "#lib/stores/toast.svelte.ts";
+  import { dateGroup } from "#lib/util/format.ts";
+  import Icon from "#lib/components/Icon.svelte";
+  import MessageRow from "#lib/components/MessageRow.svelte";
+  import MessageView from "#lib/components/MessageView.svelte";
 
   const EMPTY: Record<MailFolder, { title: string; desc: string }> = {
     inbox: { title: "You're all caught up", desc: "New mail will show up here." },
@@ -114,7 +114,7 @@
   function open(id: string) {
     const replace = !!openId;
     if (!replace) pushedOpen = true;
-    goto(urlFor(id), { noScroll: true, keepFocus: true, replaceState: replace });
+    goto(urlFor(id), { reset: false, replace });
   }
 
   function close() {
@@ -122,7 +122,7 @@
       pushedOpen = false;
       history.back();
     } else {
-      goto(urlFor(null), { noScroll: true, keepFocus: true, replaceState: true });
+      goto(urlFor(null), { reset: false, replace: true });
     }
   }
 
@@ -135,7 +135,7 @@
   function afterOpenRemoved() {
     if (ui.mobile) { close(); return; }
     const next = emails[openIndex + 1] ?? emails[openIndex - 1];
-    if (next && next.messageId !== openId) goto(urlFor(next.messageId), { noScroll: true, keepFocus: true, replaceState: true });
+    if (next && next.messageId !== openId) goto(urlFor(next.messageId), { reset: false, replace: true });
     else close();
   }
 

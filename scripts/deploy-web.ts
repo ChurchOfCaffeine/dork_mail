@@ -41,7 +41,7 @@ function cacheControl(key: string): string {
   // SvelteKit puts content-hashed assets here — safe to cache forever
   if (key.startsWith("_app/immutable/")) return "public, max-age=31536000, immutable";
   // Entry points must always revalidate, or installed PWAs keep running the old build
-  if (key.endsWith(".html") || key.endsWith(".webmanifest") || /^(sw|push-sw|workbox-[\w-]+)\.js$/.test(key)) return "no-cache";
+  if (key.endsWith(".html") || key.endsWith(".webmanifest") || key === "service-worker.js") return "no-cache";
   return "public, max-age=3600";
 }
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
-  import { toasts } from "$lib/stores/toast.svelte";
+  import { toasts } from "#lib/stores/toast.svelte.ts";
 </script>
 
 <div class="toasts" aria-live="polite">

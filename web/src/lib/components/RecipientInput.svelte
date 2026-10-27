@@ -21,8 +21,8 @@
 </script>
 
 <script lang="ts">
-  import { searchContacts } from "$lib/stores/contacts";
-  import { displayName } from "$lib/util/format";
+  import { searchContacts } from "#lib/stores/contacts.ts";
+  import { displayName } from "#lib/util/format.ts";
 
   let { label, value = $bindable([]) }: { label: string; value: EmailAddress[] } = $props();
 

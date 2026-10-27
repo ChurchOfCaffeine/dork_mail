@@ -4,11 +4,11 @@
   import { goto, afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import type { MailFolder } from "@dork-mail/shared";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { mail, FOLDER_LABELS } from "$lib/stores/mail.svelte";
-  import { ui } from "$lib/stores/ui.svelte";
-  import Icon, { type IconName } from "$lib/components/Icon.svelte";
-  import Toasts from "$lib/components/Toasts.svelte";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import { mail, FOLDER_LABELS } from "#lib/stores/mail.svelte.ts";
+  import { ui } from "#lib/stores/ui.svelte.ts";
+  import Icon, { type IconName } from "#lib/components/Icon.svelte";
+  import Toasts from "#lib/components/Toasts.svelte";
 
   const POLL_MS = 30_000;
 

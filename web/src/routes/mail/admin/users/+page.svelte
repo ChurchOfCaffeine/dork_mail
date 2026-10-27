@@ -1,8 +1,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth.svelte";
-  import * as api from "$lib/api/client";
-  import PageHeader from "$lib/components/PageHeader.svelte";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import * as api from "#lib/api/client.ts";
+  import PageHeader from "#lib/components/PageHeader.svelte";
   import type { UserPublic } from "@dork-mail/shared";
 
   // Redirect non-admins

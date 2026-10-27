@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import * as api from "$lib/api/client";
-  import { auth } from "$lib/stores/auth.svelte";
+  import * as api from "#lib/api/client.ts";
+  import { auth } from "#lib/stores/auth.svelte.ts";
   import type { DnsCheckResult } from "@dork-mail/shared";
 
   // ─── State ──────────────────────────────────────────────────────────────────

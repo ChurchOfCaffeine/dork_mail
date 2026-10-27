@@ -1,12 +1,12 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import type { StoredEmail, MailFolder, Attachment } from "@dork-mail/shared";
-  import * as api from "$lib/api/client";
-  import { mail, folderActions, FOLDER_LABELS, type FolderAction } from "$lib/stores/mail.svelte";
-  import { prefs } from "$lib/stores/prefs.svelte";
-  import { toasts } from "$lib/stores/toast.svelte";
-  import { auth } from "$lib/stores/auth.svelte";
-  import { fullDate, shortDate, displayName, formatAddress, fileSize, linkify, splitQuoted } from "$lib/util/format";
+  import * as api from "#lib/api/client.ts";
+  import { mail, folderActions, FOLDER_LABELS, type FolderAction } from "#lib/stores/mail.svelte.ts";
+  import { prefs } from "#lib/stores/prefs.svelte.ts";
+  import { toasts } from "#lib/stores/toast.svelte.ts";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import { fullDate, shortDate, displayName, formatAddress, fileSize, linkify, splitQuoted } from "#lib/util/format.ts";
   import Icon from "./Icon.svelte";
   import Avatar from "./Avatar.svelte";
   import EmailFrame, { hasRemoteContent } from "./EmailFrame.svelte";

@@ -14,7 +14,7 @@ import type {
   UploadResponse,
   PushSubscriptionRequest,
 } from "@dork-mail/shared";
-import { auth } from "$lib/stores/auth.svelte";
+import { auth } from "#lib/stores/auth.svelte.ts";
 
 const BASE = "/api";
 

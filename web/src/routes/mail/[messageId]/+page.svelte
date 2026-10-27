@@ -8,6 +8,6 @@
       folder: page.url.searchParams.get("folder") ?? "inbox",
       m: page.params.messageId!,
     });
-    goto(`/mail?${qs}`, { replaceState: true });
+    goto(`/mail?${qs}`, { replace: true });
   });
 </script>
