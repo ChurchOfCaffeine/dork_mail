@@ -9,24 +9,31 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: false,
       manifest: {
+        id: "/mail",
         name: "Dork Mail",
         short_name: "Dork Mail",
         description: "Self-hosted personal email",
-        version: "1.0.0",
-        theme_color: "#5b6ad0",
+        theme_color: "#4f5ec7",
         background_color: "#0f1117",
         display: "standalone",
-        orientation: "portrait-primary",
         start_url: "/mail",
         scope: "/",
+        categories: ["productivity", "utilities"],
         icons: [
           { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+        shortcuts: [
+          { name: "Compose", url: "/mail/compose", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
         ],
       },
       workbox: {
-        navigateFallback: null,
-        globPatterns: ["**/*.{js,css,html,svg,ico,woff2,webmanifest}"],
+        // SPA shell for offline launches; API calls always go to the network.
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/api\//],
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2,webmanifest}"],
+        importScripts: ["/push-sw.js"],
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,

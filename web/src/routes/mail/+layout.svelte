@@ -1,395 +1,244 @@
 <script lang="ts">
-  import { auth } from "$lib/stores/auth.svelte";
+  import { untrack } from "svelte";
+  import { fade } from "svelte/transition";
   import { goto, afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
+  import type { MailFolder } from "@dork-mail/shared";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { mail, FOLDER_LABELS } from "$lib/stores/mail.svelte";
+  import { ui } from "$lib/stores/ui.svelte";
+  import Icon, { type IconName } from "$lib/components/Icon.svelte";
+  import Toasts from "$lib/components/Toasts.svelte";
 
-  const folders = [
-    { id: "inbox",  label: "Inbox",  icon: "⊡" },
-    { id: "sent",   label: "Sent",   icon: "↗" },
-    { id: "drafts", label: "Drafts", icon: "✎" },
-    { id: "trash",  label: "Trash",  icon: "⌫" },
-    { id: "spam",   label: "Spam",   icon: "⚑" },
+  const POLL_MS = 30_000;
+
+  const folders: { id: MailFolder; icon: IconName }[] = [
+    { id: "inbox", icon: "inbox" },
+    { id: "archive", icon: "archive" },
+    { id: "sent", icon: "send" },
+    { id: "spam", icon: "spam" },
+    { id: "trash", icon: "trash" },
   ];
 
   let { children } = $props();
-  let sidebarOpen = $state(false);
-  let collapsed = $state(false);
 
-  // Close mobile overlay on navigation
-  afterNavigate(() => { sidebarOpen = false; });
+  let activeFolder = $derived(page.url.pathname === "/mail" ? (page.url.searchParams.get("folder") ?? "inbox") as MailFolder : null);
+
+  afterNavigate(() => { ui.drawerOpen = false; });
+
+  function refreshNow() {
+    void mail.refreshCounts();
+    const f = untrack(() => activeFolder);
+    if (f) void mail.refresh(f);
+  }
+
+  // Refresh whenever the app comes back to the foreground, then poll while it stays there.
+  $effect(() => {
+    if (!ui.visible || !ui.online) return;
+    untrack(refreshNow);
+    const timer = setInterval(refreshNow, POLL_MS);
+    return () => clearInterval(timer);
+  });
+
+  $effect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "new-mail") refreshNow();
+      if (e.data?.type === "open" && typeof e.data.url === "string") goto(e.data.url);
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  });
 
   function signOut() {
     auth.logout();
     goto("/login");
   }
-
-  let activeFolder = $derived(page.url.searchParams.get("folder") ?? "inbox");
 </script>
 
-<!-- Mobile top bar (hidden on desktop) -->
-<header class="mobile-topbar">
-  <button
-    class="hamburger"
-    onclick={() => (sidebarOpen = !sidebarOpen)}
-    aria-label="Toggle navigation"
-    aria-expanded={sidebarOpen}
-  >
-    <span></span>
-    <span></span>
-    <span></span>
-  </button>
-  <span class="mobile-brand">Dork Mail</span>
-  <a href="/mail/compose" class="btn btn-primary mobile-compose" aria-label="Compose">✎</a>
-</header>
-
-<!-- Mobile backdrop -->
-{#if sidebarOpen}
-  <div class="backdrop" role="presentation" onclick={() => (sidebarOpen = false)} onkeydown={() => (sidebarOpen = false)}></div>
+{#if ui.drawerOpen}
+  <div class="backdrop" role="presentation" onclick={() => (ui.drawerOpen = false)} transition:fade={{ duration: 150 }}></div>
 {/if}
 
 <div class="shell">
-  <aside class="sidebar" class:open={sidebarOpen} class:collapsed>
-    <div class="sidebar-head">
-      {#if !collapsed}
-        <span class="brand">Dork Mail</span>
-      {/if}
-      <button
-        class="collapse-btn btn btn-ghost"
-        onclick={() => (collapsed = !collapsed)}
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand" : "Collapse"}
-      >
-        {collapsed ? "›" : "‹"}
-      </button>
+  <aside class="sidebar" class:open={ui.drawerOpen} aria-label="Mailboxes">
+    <div class="brand">
+      <img src="/icon.svg" alt="" width="28" height="28" />
+      <span>Dork Mail</span>
     </div>
 
-    <a
-      href="/mail/compose"
-      class="btn btn-primary compose-btn"
-      title={collapsed ? "Compose" : undefined}
-    >
-      <span class="compose-icon">✎</span>
-      {#if !collapsed}<span>Compose</span>{/if}
+    <a href="/mail/compose" class="btn btn-primary compose">
+      <Icon name="compose" size={18} /> Compose
     </a>
 
     <nav class="folders">
-      {#each folders as f}
-        <a
-          href="/mail?folder={f.id}"
-          class="folder-link"
-          class:active={activeFolder === f.id}
-          title={collapsed ? f.label : undefined}
-        >
-          <span class="icon">{f.icon}</span>
-          {#if !collapsed}<span>{f.label}</span>{/if}
+      {#each folders as f (f.id)}
+        {@const unread = f.id === "inbox" || f.id === "spam" ? mail.counts[f.id] : 0}
+        <a href="/mail?folder={f.id}" class="folder" class:active={activeFolder === f.id} aria-current={activeFolder === f.id ? "page" : undefined}>
+          <Icon name={f.icon} size={19} />
+          <span class="label">{FOLDER_LABELS[f.id]}</span>
+          {#if unread}<span class="count" class:muted={f.id === "spam"}>{unread > 999 ? "999+" : unread}</span>{/if}
         </a>
       {/each}
     </nav>
 
-    <div class="sidebar-footer">
+    <div class="footer">
       {#if auth.isAdmin}
-        <a
-          href="/mail/admin/users"
-          class="btn btn-ghost setup-btn"
-          title={collapsed ? "Users" : undefined}
-        >
-          <span>👥</span>
-          {#if !collapsed}<span>Users</span>{/if}
+        <a href="/mail/admin/users" class="folder" class:active={page.url.pathname.startsWith("/mail/admin")}>
+          <Icon name="users" size={19} /><span class="label">Users</span>
         </a>
-        <a
-          href="/setup"
-          class="btn btn-ghost setup-btn"
-          title={collapsed ? "Setup / DNS" : undefined}
-        >
-          <span>⚙</span>
-          {#if !collapsed}<span>Setup / DNS</span>{/if}
-        </a>
+        <a href="/setup" class="folder"><Icon name="globe" size={19} /><span class="label">Setup / DNS</span></a>
       {/if}
-      <a
-        href="/mail/account"
-        class="btn btn-ghost setup-btn"
-        title={collapsed ? "Account" : undefined}
-      >
-        <span>◉</span>
-        {#if !collapsed}<span>Account</span>{/if}
+      <a href="/mail/account" class="folder" class:active={page.url.pathname === "/mail/account"}>
+        <Icon name="user" size={19} />
+        <span class="label account">
+          <span>{auth.displayName || "Account"}</span>
+          <span class="email">{auth.email}</span>
+        </span>
       </a>
-      <div class="user-area">
-        {#if !collapsed}
-          <span class="user-email">{auth.displayName ?? auth.email}</span>
-          <button class="btn btn-ghost signout-btn" onclick={signOut}>Sign out</button>
-        {:else}
-          <button class="btn btn-ghost signout-icon" onclick={signOut} title="Sign out">⏻</button>
-        {/if}
-      </div>
+      <button class="folder" onclick={signOut}><Icon name="log-out" size={19} /><span class="label">Sign out</span></button>
     </div>
   </aside>
 
   <main class="main">
+    {#if !ui.online}
+      <div class="offline" transition:fade={{ duration: 150 }}><Icon name="offline" size={14} /> Offline, showing saved mail</div>
+    {/if}
     {@render children()}
   </main>
 </div>
 
+<Toasts />
+
 <style>
-  /* ── Shell ──────────────────────────────────────────────────────── */
   .shell {
     display: flex;
     height: 100dvh;
     overflow: hidden;
+    background: var(--bg-surface);
   }
 
-  /* ── Sidebar ────────────────────────────────────────────────────── */
   .sidebar {
-    width: 220px;
-    background: var(--bg-surface);
-    border-right: 1px solid var(--border);
+    width: 240px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    padding: 12px 0;
-    flex-shrink: 0;
-    overflow: hidden;
-    transition: width 0.2s ease;
-  }
-
-  .sidebar.collapsed { width: 52px; }
-
-  .sidebar-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 10px 12px;
-    min-height: 36px;
-  }
-
-  .sidebar.collapsed .sidebar-head {
-    justify-content: center;
-    padding: 0 0 12px;
+    padding: 12px 10px;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
   }
 
   .brand {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: -0.3px;
-    white-space: nowrap;
-  }
-
-  .collapse-btn {
-    padding: 3px 7px;
-    font-size: 16px;
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-  .collapse-btn:hover { color: var(--text-primary); }
-
-  /* ── Compose ────────────────────────────────────────────────────── */
-  .compose-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    margin: 0 8px 16px;
-    padding: 8px 12px;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-
-  .sidebar.collapsed .compose-btn {
-    width: 36px;
-    padding: 8px;
-    margin: 0 auto 16px;
-  }
-
-  /* ── Folder nav ─────────────────────────────────────────────────── */
-  .folders {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-  }
-
-  .folder-link {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 9px 16px;
+    padding: 4px 8px 16px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .brand img { border-radius: 7px; }
+
+  .compose {
+    justify-content: flex-start;
+    gap: 10px;
+    margin: 0 0 16px;
+    padding: 12px 18px;
+    border-radius: var(--radius-lg);
+    font-size: 15px;
+    box-shadow: var(--shadow);
+  }
+
+  .folders { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+
+  .folder {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 14px;
+    border-radius: 99px;
     color: var(--text-secondary);
     font-size: 14px;
-    text-decoration: none;
-    white-space: nowrap;
-    transition: background 0.1s, color 0.1s;
+    text-align: left;
+    transition: background 0.12s, color 0.12s;
   }
-  .folder-link:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .folder-link.active {
-    background: var(--accent-dim);
-    color: var(--accent);
-    font-weight: 500;
-  }
+  .folder:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .folder.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+  .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .count { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .folder.active .count { color: var(--accent); }
+  .count.muted { color: var(--text-muted); font-weight: 600; }
 
-  .sidebar.collapsed .folder-link {
-    justify-content: center;
-    padding: 9px 0;
-  }
-
-  .icon { font-style: normal; width: 18px; text-align: center; flex-shrink: 0; }
-
-  /* ── Footer ─────────────────────────────────────────────────────── */
-  .sidebar-footer {
+  .footer {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 8px;
+    gap: 1px;
+    padding-top: 10px;
+    margin-top: 10px;
     border-top: 1px solid var(--border);
   }
+  .account { display: flex; flex-direction: column; line-height: 1.3; }
+  .email { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 
-  .setup-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-
-  .sidebar.collapsed .setup-btn {
-    justify-content: center;
-    padding: 8px 0;
-  }
-
-  .user-area {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    padding: 4px 4px 0;
-  }
-
-  .sidebar.collapsed .user-area { justify-content: center; }
-
-  .user-email {
-    font-size: 12px;
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
-  .signout-btn { font-size: 12px; flex-shrink: 0; }
-  .signout-icon { padding: 4px 8px; }
-
-  /* ── Main ───────────────────────────────────────────────────────── */
   .main {
+    position: relative;
     flex: 1;
-    overflow: hidden;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    min-width: 0;
+    overflow: hidden;
   }
 
-  /* ── Mobile top bar (hidden on desktop) ─────────────────────────── */
-  .mobile-topbar { display: none; }
+  .offline {
+    position: absolute;
+    top: calc(var(--safe-top) + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 99px;
+    background: var(--text-primary);
+    color: var(--bg-surface);
+    font-size: 12px;
+    font-weight: 500;
+    pointer-events: none;
+  }
+
   .backdrop { display: none; }
 
-  /* ── Mobile ─────────────────────────────────────────────────────── */
   @media (max-width: 767px) {
-    .mobile-topbar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      height: calc(52px + env(safe-area-inset-top));
-      padding: env(safe-area-inset-top) 12px 0;
-      padding-bottom: 10px;
-      background: var(--bg-surface);
-      border-bottom: 1px solid var(--border);
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 50;
-    }
-
-    .mobile-brand {
-      flex: 1;
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.3px;
-    }
-
-    .mobile-compose {
-      padding: 6px 12px;
-      font-size: 15px;
-    }
-
-    .shell {
-      padding-top: calc(52px + env(safe-area-inset-top));
-      padding-bottom: env(safe-area-inset-bottom);
-      height: 100dvh;
-    }
-
     .sidebar {
       position: fixed;
-      top: 0;
-      left: 0;
-      height: 100dvh;
-      width: 270px;
-      z-index: 100;
+      inset: 0 auto 0 0;
+      z-index: 200;
+      width: min(300px, 84vw);
+      padding-top: calc(var(--safe-top) + 12px);
+      padding-bottom: calc(var(--safe-bottom) + 12px);
+      background: var(--bg-surface);
+      border-right: none;
       transform: translateX(-100%);
-      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      /* Reset collapsed width on mobile */
-      min-width: 270px;
-      padding-bottom: env(safe-area-inset-bottom);
+      transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1), visibility 0s 0.24s;
+      visibility: hidden;
     }
-
     .sidebar.open {
-      transform: translateX(0);
-      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+      transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+      transform: none;
+      visibility: visible;
+      box-shadow: var(--shadow-lg);
     }
-
-    .sidebar.collapsed { width: 270px; }
-
-    .sidebar .sidebar-head {
-      padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
-      justify-content: flex-start;
-    }
-
-    .sidebar .brand { display: block !important; }
-    .collapse-btn { display: none; }
-
-    /* Restore full sidebar appearance on mobile regardless of collapsed state */
-    .sidebar.collapsed .sidebar-head { justify-content: flex-start; padding: calc(env(safe-area-inset-top) + 12px) 16px 12px; }
-    .sidebar.collapsed .compose-btn { width: auto; padding: 8px 12px; margin: 0 8px 16px; }
-    .sidebar.collapsed .folder-link { justify-content: flex-start; padding: 9px 16px; }
-    .sidebar.collapsed .setup-btn { justify-content: flex-start; }
-    .sidebar.collapsed .user-area { justify-content: space-between; }
-
+    .folder { min-height: 46px; font-size: 15px; }
     .backdrop {
       display: block;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.55);
-      backdrop-filter: blur(2px);
-      z-index: 99;
+      z-index: 199;
+      background: var(--bg-overlay);
     }
-  }
-
-  /* ── Hamburger ──────────────────────────────────────────────────── */
-  .hamburger {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 5px;
-    width: 36px;
-    height: 36px;
-    padding: 8px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .hamburger:hover { background: var(--bg-hover); }
-  .hamburger span {
-    display: block;
-    height: 2px;
-    background: var(--text-primary);
-    border-radius: 2px;
   }
 </style>

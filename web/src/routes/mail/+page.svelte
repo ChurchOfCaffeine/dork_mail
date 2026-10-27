@@ -1,1012 +1,667 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+  import { SvelteSet } from "svelte/reactivity";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import * as api from "$lib/api/client";
-  import type { StoredEmail } from "@dork-mail/shared";
+  import { MAIL_FOLDERS, type EmailSummary, type MailFolder } from "@dork-mail/shared";
+  import { mail, folderActions, FOLDER_LABELS, type FolderAction } from "$lib/stores/mail.svelte";
+  import { ui, isTyping } from "$lib/stores/ui.svelte";
+  import { toasts } from "$lib/stores/toast.svelte";
+  import { dateGroup } from "$lib/util/format";
+  import Icon from "$lib/components/Icon.svelte";
+  import MessageRow from "$lib/components/MessageRow.svelte";
+  import MessageView from "$lib/components/MessageView.svelte";
 
-  let emails = $state<StoredEmail[]>([]);
-  let loading = $state(true);
-  let error = $state("");
-  let nextCursor = $state<string | undefined>(undefined);
-  let loadingMore = $state(false);
-  let emptyingTrash = $state(false);
-  let refreshing = $state(false);
-
-  // Split-pane state
-  let selectedId = $state<string | null>(null);
-  let selectedEmail = $state<StoredEmail | null>(null);
-  let detailLoading = $state(false);
-  let detailError = $state("");
-  let iframeEl = $state<HTMLIFrameElement | undefined>(undefined);
-
-  let folder = $derived(page.url.searchParams.get("folder") ?? "inbox");
-
-  // Close panel when folder changes
-  let prevFolder = $state(folder);
-  $effect(() => {
-    if (folder !== prevFolder) {
-      prevFolder = folder;
-      selectedId = null;
-      selectedEmail = null;
-    }
-  });
-
-  const FOLDER_EMPTY: Record<string, { icon: string; title: string; desc: string; showCompose?: boolean }> = {
-    inbox:  { icon: "📬", title: "Your inbox is empty",  desc: "New emails will appear here when they arrive.", showCompose: true },
-    sent:   { icon: "📤", title: "No sent emails",       desc: "Emails you send will show up here.", showCompose: true },
-    drafts: { icon: "📝", title: "No drafts",            desc: "Emails you're still working on will be saved here.", showCompose: true },
-    trash:  { icon: "🗑",  title: "Trash is empty",       desc: "Deleted emails will appear here." },
-    spam:   { icon: "🚫", title: "No spam",              desc: "Spam messages will be caught here." },
+  const EMPTY: Record<MailFolder, { title: string; desc: string }> = {
+    inbox: { title: "You're all caught up", desc: "New mail will show up here." },
+    archive: { title: "Nothing archived", desc: "Swipe right or press E on a message to archive it." },
+    sent: { title: "Nothing sent yet", desc: "Messages you send show up here." },
+    trash: { title: "Trash is empty", desc: "Deleted messages show up here." },
+    spam: { title: "No spam", desc: "Messages SES flags as spam land here." },
   };
 
-  // ── sessionStorage cache for instant loads ──
-  const CACHE_PREFIX = "dork_mail_list_";
-  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  let folder = $derived.by(() => {
+    const f = page.url.searchParams.get("folder") ?? "inbox";
+    return ((MAIL_FOLDERS as readonly string[]).includes(f) ? f : "inbox") as MailFolder;
+  });
+  let openId = $derived(page.url.searchParams.get("m"));
+  let box = $derived(mail.folder(folder));
+  let actions = $derived(folderActions(folder));
 
-  function cacheKey(f: string) { return `${CACHE_PREFIX}${f}`; }
-
-  function getCached(f: string): { emails: StoredEmail[]; nextCursor?: string } | null {
-    try {
-      const raw = sessionStorage.getItem(cacheKey(f));
-      if (!raw) return null;
-      const cached = JSON.parse(raw);
-      if (Date.now() - cached.ts > CACHE_TTL) {
-        sessionStorage.removeItem(cacheKey(f));
-        return null;
-      }
-      return { emails: cached.emails, nextCursor: cached.nextCursor };
-    } catch {
-      return null;
-    }
-  }
-
-  function setCache(f: string, data: { emails: StoredEmail[]; nextCursor?: string }) {
-    try {
-      sessionStorage.setItem(cacheKey(f), JSON.stringify({ ...data, ts: Date.now() }));
-    } catch {
-      // storage full — not critical
-    }
-  }
-
-  function syncCache() {
-    setCache(folder, { emails, nextCursor });
-  }
-
-  $effect(() => { load(); });
-
-  async function load() {
-    error = "";
-    nextCursor = undefined;
-
-    // Try to show cached data instantly
-    const cached = getCached(folder);
-    if (cached) {
-      emails = cached.emails;
-      nextCursor = cached.nextCursor;
-      loading = false;
-      // Refresh in background
-      refreshing = true;
-      try {
-        const res = await api.listEmails(folder);
-        emails = res.emails;
-        nextCursor = res.nextCursor;
-        setCache(folder, res);
-      } catch (e) {
-        // Keep showing cached data, don't overwrite
-      } finally {
-        refreshing = false;
-      }
-      return;
-    }
-
-    // No cache — show skeleton
-    loading = true;
-    emails = [];
-    try {
-      const res = await api.listEmails(folder);
-      emails = res.emails;
-      nextCursor = res.nextCursor;
-      setCache(folder, res);
-    } catch (e) {
-      error = (e as Error).message;
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function refresh() {
-    refreshing = true;
-    try {
-      const res = await api.listEmails(folder);
-      emails = res.emails;
-      nextCursor = res.nextCursor;
-      setCache(folder, res);
-    } catch (e) {
-      error = (e as Error).message;
-    } finally {
-      refreshing = false;
-    }
-  }
-
-  async function loadMore() {
-    if (!nextCursor || loadingMore) return;
-    loadingMore = true;
-    try {
-      const res = await api.listEmails(folder, nextCursor);
-      emails = [...emails, ...res.emails];
-      nextCursor = res.nextCursor;
-    } finally {
-      loadingMore = false;
-    }
-  }
-
-  function formatDate(iso: string) {
-    const d = new Date(iso);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-
-  function formatFull(iso: string) {
-    return new Date(iso).toLocaleString([], {
-      weekday: "short", month: "short", day: "numeric",
-      year: "numeric", hour: "2-digit", minute: "2-digit",
-    });
-  }
-
-  async function emptyTrash() {
-    if (!confirm("Permanently delete all messages in Trash?")) return;
-    emptyingTrash = true;
-    try {
-      let cursor: string | undefined;
-      do {
-        const res = await api.listEmails("trash", cursor, 100);
-        await Promise.all(res.emails.map(e => api.deleteEmail(e.messageId)));
-        cursor = res.nextCursor;
-      } while (cursor);
-      await load();
-    } finally {
-      emptyingTrash = false;
-    }
-  }
-
-  function isMobile() {
-    return typeof window !== "undefined" && window.innerWidth < 768;
-  }
-
-  async function openEmail(messageId: string) {
-    if (isMobile()) {
-      goto(`/mail/${encodeURIComponent(messageId)}?folder=${folder}`);
-      return;
-    }
-    selectedId = messageId;
-    detailLoading = true;
-    detailError = "";
-    try {
-      selectedEmail = await api.getEmail(messageId);
-      // Mark as read if unread
-      if (selectedEmail && !selectedEmail.read) {
-        await api.updateEmail(messageId, { read: true });
-        selectedEmail.read = true;
-        const idx = emails.findIndex(e => e.messageId === messageId);
-        if (idx >= 0) emails[idx] = { ...emails[idx], read: true };
-      }
-    } catch (e) {
-      detailError = (e as Error).message;
-    } finally {
-      detailLoading = false;
-    }
-  }
-
-  function closePanel() {
-    selectedId = null;
-    selectedEmail = null;
-  }
-
-  async function toggleStar(e: MouseEvent, email: StoredEmail) {
-    e.stopPropagation();
-    const prev = email.starred;
-    const idx = emails.findIndex(em => em.messageId === email.messageId);
-    if (idx >= 0) emails[idx] = { ...emails[idx], starred: !prev };
-    if (selectedEmail?.messageId === email.messageId) selectedEmail = { ...selectedEmail, starred: !prev };
-    try {
-      await api.updateEmail(email.messageId, { starred: !prev });
-    } catch {
-      if (idx >= 0) emails[idx] = { ...emails[idx], starred: prev };
-      if (selectedEmail?.messageId === email.messageId) selectedEmail = { ...selectedEmail, starred: prev };
-    }
-  }
-
-  async function toggleRead(e: MouseEvent, email: StoredEmail) {
-    e.stopPropagation();
-    const prev = email.read;
-    const idx = emails.findIndex(em => em.messageId === email.messageId);
-    if (idx >= 0) emails[idx] = { ...emails[idx], read: !prev };
-    syncCache();
-    try {
-      await api.updateEmail(email.messageId, { read: !prev });
-    } catch {
-      if (idx >= 0) emails[idx] = { ...emails[idx], read: prev };
-      syncCache();
-    }
-  }
-
-  async function trashEmail(e: MouseEvent, email: StoredEmail) {
-    e.stopPropagation();
-    try {
-      await api.deleteEmail(email.messageId);
-      emails = emails.filter(em => em.messageId !== email.messageId);
-      syncCache();
-      if (selectedId === email.messageId) closePanel();
-    } catch (err) {
-      error = (err as Error).message;
-    }
-  }
-
-  async function detailToggleStar() {
-    if (!selectedEmail) return;
-    const prev = selectedEmail.starred;
-    selectedEmail = { ...selectedEmail, starred: !prev };
-    const idx = emails.findIndex(e => e.messageId === selectedEmail!.messageId);
-    if (idx >= 0) emails[idx] = { ...emails[idx], starred: !prev };
-    try {
-      await api.updateEmail(selectedEmail.messageId, { starred: !prev });
-    } catch {
-      selectedEmail = { ...selectedEmail, starred: prev };
-      if (idx >= 0) emails[idx] = { ...emails[idx], starred: prev };
-    }
-  }
-
-  async function detailMoveToTrash() {
-    if (!selectedEmail) return;
-    try {
-      await api.deleteEmail(selectedEmail.messageId);
-      emails = emails.filter(e => e.messageId !== selectedEmail!.messageId);
-      closePanel();
-    } catch (e) {
-      detailError = (e as Error).message;
-    }
-  }
-
-  function detailReply() {
-    if (!selectedEmail) return;
-    const to = encodeURIComponent(selectedEmail.from.address);
-    const subject = encodeURIComponent(`Re: ${selectedEmail.subject}`);
-    const replyTo = encodeURIComponent(selectedEmail.messageId);
-    goto(`/mail/compose?to=${to}&subject=${subject}&replyTo=${replyTo}`);
-  }
-
-  function injectIframeStyles(html: string): string {
-    const style = `<style>
-      html { overflow-x: hidden !important; }
-      body {
-        max-width: 100% !important;
-        overflow-x: hidden !important;
-        word-break: break-word;
-        background: #1a1d27 !important;
-        color: #e2e4f0 !important;
-        font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif !important;
-        font-size: 14px !important;
-        line-height: 1.65 !important;
-        padding: 20px !important;
-        margin: 0 !important;
-      }
-      a { color: #7b8af0 !important; }
-      img, table, td, th, div, p, span { max-width: 100% !important; box-sizing: border-box !important; }
-      img { height: auto !important; }
-      pre { white-space: pre-wrap !important; color: #e2e4f0 !important; }
-      blockquote {
-        border-left: 3px solid #3a3f5c !important;
-        margin: 12px 0 !important;
-        padding: 4px 16px !important;
-        color: #8b90a8 !important;
-      }
-      hr { border: none !important; border-top: 1px solid #2e3347 !important; margin: 16px 0 !important; }
-      table { border-collapse: collapse !important; }
-      td, th { border: 1px solid #2e3347 !important; padding: 6px 10px !important; }
-    </style>`;
-    const headRegex = /<head>/i;
-    if (headRegex.test(html)) return html.replace(headRegex, (match) => `${match}${style}`);
-    return style + html;
-  }
-
-  async function openAttachment(s3Key: string) {
-    if (!selectedEmail) return;
-    const res = await api.getAttachmentUrl(selectedEmail.messageId, s3Key);
-    window.open(res.url, "_blank");
-  }
-
-  function senderInitial(email: StoredEmail): string {
-    return (email.from.name ?? email.from.address).charAt(0).toUpperCase();
-  }
-
-  function senderColor(email: StoredEmail): string {
-    const name = email.from.name ?? email.from.address;
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    const colors = ["#5b6ad0", "#d05b6a", "#5bd08a", "#d0aa5b", "#8b5bd0", "#5bc4d0", "#d07b5b"];
-    return colors[Math.abs(hash) % colors.length];
-  }
-
-  // Silent background refresh
-  async function silentRefresh() {
-    try {
-      const res = await api.listEmails(folder);
-      const existingIds = new Set(emails.map(e => e.messageId));
-      const fresh = res.emails.filter(e => !existingIds.has(e.messageId));
-      if (fresh.length) {
-        emails = [...fresh, ...emails];
-        syncCache();
-      }
-    } catch {
-      // ignore
-    }
-  }
+  // ─── Search ──────────────────────────────────────────────────────────────
+  let query = $state("");
+  let searchOpen = $state(false);
+  let searchInput = $state<HTMLInputElement>();
+  let search = $state<{ q: string; emails: EmailSummary[]; cursor?: string; loading: boolean; loadingMore: boolean } | null>(null);
 
   $effect(() => {
-    void folder;
-    const id = setInterval(silentRefresh, 60_000);
-    return () => clearInterval(id);
+    const q = query.trim();
+    const f = folder;
+    if (q.length < 2) { search = null; return; }
+    const timer = setTimeout(async () => {
+      search = { q, emails: search?.q === q ? search.emails : [], loading: true, loadingMore: false };
+      try {
+        const res = await mail.search(f, q);
+        if (untrack(() => query.trim()) === q) search = { q, emails: res.emails, cursor: res.nextCursor, loading: false, loadingMore: false };
+      } catch (e) {
+        toasts.error((e as Error).message);
+        if (search) search.loading = false;
+      }
+    }, 250);
+    return () => clearTimeout(timer);
   });
+
+  async function searchMore() {
+    if (!search?.cursor || search.loadingMore) return;
+    search.loadingMore = true;
+    const s = search;
+    try {
+      const res = await mail.search(folder, s.q, s.cursor);
+      if (search === s) { s.emails = [...s.emails, ...res.emails]; s.cursor = res.nextCursor; }
+    } finally {
+      s.loadingMore = false;
+    }
+  }
+
+  function closeSearch() {
+    query = "";
+    searchOpen = false;
+    search = null;
+  }
+
+  // ─── List ────────────────────────────────────────────────────────────────
+  let emails = $derived(search ? search.emails : box.emails);
+  let groups = $derived.by(() => {
+    const out: { label: string; items: EmailSummary[] }[] = [];
+    for (const e of emails) {
+      const label = dateGroup(e.receivedAt);
+      if (out.at(-1)?.label !== label) out.push({ label, items: [] });
+      out.at(-1)!.items.push(e);
+    }
+    return out;
+  });
+  let openIndex = $derived(openId ? emails.findIndex(e => e.messageId === openId) : -1);
+
+  const selection = new SvelteSet<string>();
+  let selecting = $derived(selection.size > 0);
+
+  // Folder switches reset transient state and fetch fresh data.
+  let shownFolder: MailFolder | null = null;
+  $effect(() => {
+    const f = folder;
+    untrack(() => {
+      if (Date.now() - mail.folder(f).fetchedAt > 5000) void mail.refresh(f);
+      if (shownFolder && shownFolder !== f) {
+        selection.clear();
+        closeSearch();
+        listEl?.scrollTo({ top: 0 });
+      }
+      shownFolder = f;
+    });
+  });
+
+  // ─── Navigation ──────────────────────────────────────────────────────────
+  let pushedOpen = false;
+
+  function urlFor(id: string | null) {
+    const qs = new URLSearchParams({ folder });
+    if (id) qs.set("m", id);
+    return `/mail?${qs}`;
+  }
+
+  function open(id: string) {
+    const replace = !!openId;
+    if (!replace) pushedOpen = true;
+    goto(urlFor(id), { noScroll: true, keepFocus: true, replaceState: replace });
+  }
+
+  function close() {
+    if (pushedOpen) {
+      pushedOpen = false;
+      history.back();
+    } else {
+      goto(urlFor(null), { noScroll: true, keepFocus: true, replaceState: true });
+    }
+  }
+
+  function step(dir: -1 | 1) {
+    const next = emails[(openIndex < 0 ? -1 : openIndex) + dir];
+    if (next) open(next.messageId);
+  }
+
+  /** The open message is leaving this folder: show its neighbor on desktop, go back on mobile. */
+  function afterOpenRemoved() {
+    if (ui.mobile) { close(); return; }
+    const next = emails[openIndex + 1] ?? emails[openIndex - 1];
+    if (next && next.messageId !== openId) goto(urlFor(next.messageId), { noScroll: true, keepFocus: true, replaceState: true });
+    else close();
+  }
+
+  // ─── Actions ─────────────────────────────────────────────────────────────
+  async function apply(action: FolderAction, ids: string[]) {
+    if (!ids.length) return;
+    if (openId && ids.includes(openId)) afterOpenRemoved();
+    if (search) search.emails = search.emails.filter(e => !ids.includes(e.messageId));
+    if (action.to === "delete") {
+      if (!confirm(ids.length === 1 ? "Delete this message forever?" : `Delete ${ids.length} messages forever?`)) return;
+      await mail.deleteForever(ids);
+    } else {
+      await mail.move(ids, folder, action.to, { label: action.to === "spam" ? "Reported as spam" : undefined });
+    }
+  }
+
+  function swipe(email: EmailSummary, dir: "left" | "right") {
+    const action = dir === "right" ? actions.primary : actions.remove;
+    if (action) void apply(action, [email.messageId]);
+  }
+
+  function toggleCheck(id: string) {
+    if (selection.has(id)) selection.delete(id);
+    else selection.add(id);
+  }
+
+  function bulk(action: FolderAction) {
+    const ids = [...selection];
+    selection.clear();
+    void apply(action, ids);
+  }
+
+  function bulkRead(read: boolean) {
+    void mail.setRead([...selection], read);
+    selection.clear();
+  }
+
+  async function emptyFolder() {
+    if (folder !== "trash" && folder !== "spam") return;
+    if (!confirm(`Permanently delete everything in ${FOLDER_LABELS[folder]}?`)) return;
+    emptying = true;
+    try { await mail.emptyFolder(folder); }
+    catch (e) { toasts.error((e as Error).message); }
+    finally { emptying = false; }
+  }
+  let emptying = $state(false);
+
+  // ─── Keyboard shortcuts ──────────────────────────────────────────────────
+  function onkeydown(e: KeyboardEvent) {
+    if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) {
+      if (e.key === "Escape" && e.target === searchInput) { closeSearch(); searchInput?.blur(); }
+      return;
+    }
+    const target = openId ? [openId] : [...selection];
+    switch (e.key) {
+      case "j": case "ArrowDown": step(1); break;
+      case "k": case "ArrowUp": step(-1); break;
+      case "e": if (actions.primary) void apply(actions.primary, target); selection.clear(); break;
+      case "#": case "Delete": void apply(actions.remove, target); selection.clear(); break;
+      case "!": if (actions.spam) void apply(actions.spam, target); break;
+      case "s": if (openId) { const m = mail.find(openId); if (m) void mail.setStarred(openId, !m.starred); } break;
+      case "u": if (openId) { void mail.setRead([openId], false); close(); } else bulkRead(false); break;
+      case "r": if (openId) goto(`/mail/compose?mode=reply&id=${encodeURIComponent(openId)}`); break;
+      case "a": if (openId) goto(`/mail/compose?mode=replyAll&id=${encodeURIComponent(openId)}`); break;
+      case "f": if (openId) goto(`/mail/compose?mode=forward&id=${encodeURIComponent(openId)}`); break;
+      case "x": if (openId) toggleCheck(openId); break;
+      case "c": goto("/mail/compose"); break;
+      case "/": searchOpen = true; queueMicrotask(() => searchInput?.focus()); break;
+      case "Escape":
+        if (selecting) selection.clear();
+        else if (openId) close();
+        else if (search) closeSearch();
+        break;
+      default: return;
+    }
+    e.preventDefault();
+  }
+
+  // ─── Infinite scroll & pull to refresh ───────────────────────────────────
+  let listEl = $state<HTMLElement>();
+
+  export const snapshot = {
+    capture: () => listEl?.scrollTop ?? 0,
+    restore: (top: number) => { if (listEl) listEl.scrollTop = top; },
+  };
+  let sentinel = $state<HTMLElement>();
+
+  $effect(() => {
+    if (!sentinel || !listEl) return;
+    const io = new IntersectionObserver(entries => {
+      if (!entries[0].isIntersecting) return;
+      if (search) void searchMore();
+      else void mail.loadMore(folder);
+    }, { root: listEl, rootMargin: "600px" });
+    io.observe(sentinel);
+    return () => io.disconnect();
+  });
+
+  const PULL_TRIGGER = 72;
+  let pull = $state(0);
+  let pullArmed = false;
+  let pulling = false;
+  let pullStartY = 0;
+  let lastY = 0;
+
+  function touchstart(e: TouchEvent) {
+    pullArmed = !search;
+    pulling = false;
+    lastY = e.touches[0].clientY;
+  }
+  function touchmove(e: TouchEvent) {
+    const y = e.touches[0].clientY;
+    // The pull starts once a downward drag reaches the top, so a scroll that
+    // lands at the top can continue straight into a refresh.
+    if (!pulling) {
+      if (pullArmed && listEl && listEl.scrollTop <= 0 && y > lastY) {
+        pulling = true;
+        pullStartY = y;
+      }
+      lastY = y;
+      return;
+    }
+    const dy = y - pullStartY;
+    if (dy <= 0 || listEl!.scrollTop > 0) { pull = 0; return; }
+    pull = Math.min(110, dy * 0.5);
+  }
+  function touchend() {
+    if (!pulling) return;
+    pulling = false;
+    if (pull >= PULL_TRIGGER) {
+      navigator.vibrate?.(8);
+      void Promise.all([mail.refresh(folder), mail.refreshCounts()]);
+    }
+    pull = 0;
+  }
+
+  // Standalone iOS PWAs have no browser back gesture, so the reading view provides one.
+  let backDx = $state(0);
+  let backTracking = false;
+  let backStartX = 0;
+  let backStartY = 0;
+  let backSettling = $state(false);
+
+  function backStart(e: TouchEvent) {
+    const t = e.touches[0];
+    backTracking = ui.mobile && t.clientX < 28;
+    backStartX = t.clientX;
+    backStartY = t.clientY;
+  }
+  function backMove(e: TouchEvent) {
+    if (!backTracking) return;
+    const t = e.touches[0];
+    const dx = t.clientX - backStartX;
+    if (backDx === 0 && Math.abs(t.clientY - backStartY) > Math.abs(dx)) { backTracking = false; return; }
+    backDx = Math.max(0, dx);
+  }
+  function backEnd() {
+    if (!backTracking) return;
+    backTracking = false;
+    backSettling = true;
+    if (backDx > innerWidth * 0.33) {
+      backDx = innerWidth;
+      closeAfterSettle = true;
+    } else {
+      backDx = 0;
+    }
+  }
+  let closeAfterSettle = false;
+  function backSettled(e: TransitionEvent) {
+    if (e.target !== e.currentTarget) return;
+    backSettling = false;
+    if (closeAfterSettle) {
+      closeAfterSettle = false;
+      close();
+      backDx = 0;
+    }
+  }
+
+  let refreshing = $derived(box.loading && box.loaded);
+  let showSkeleton = $derived(!search && !box.loaded && box.loading);
 </script>
 
-<div class="inbox" class:has-panel={selectedId !== null}>
-  <!-- Email list column -->
-  <div class="list-col" class:hidden-mobile={selectedId !== null}>
-    <header class="toolbar">
-      <h2 class="folder-title">{folder.charAt(0).toUpperCase() + folder.slice(1)}</h2>
-      <div class="toolbar-actions">
-        <button class="btn btn-ghost icon-btn" onclick={refresh} disabled={loading || refreshing} title="Refresh">
-          <span class="refresh-icon" class:spinning={refreshing}>&#x21BA;</span>
-        </button>
-        {#if folder === "trash" && emails.length > 0}
-          <button class="btn btn-ghost danger" onclick={emptyTrash} disabled={emptyingTrash}>
-            {emptyingTrash ? "Deleting..." : "Empty Trash"}
+<svelte:window {onkeydown} />
+
+<div class="mailbox" class:has-open={!!openId}>
+  <section class="list-pane" aria-label="{FOLDER_LABELS[folder]} messages">
+    <header class="list-header">
+      {#if selecting}
+        <button class="icon-btn" onclick={() => selection.clear()} aria-label="Clear selection"><Icon name="x" /></button>
+        <span class="title selection-count">{selection.size}</span>
+        <div class="spacer"></div>
+        {#if actions.primary}
+          <button class="icon-btn" onclick={() => bulk(actions.primary!)} title={actions.primary.label} aria-label={actions.primary.label}><Icon name={actions.primary.icon} /></button>
+        {/if}
+        <button class="icon-btn" onclick={() => bulk(actions.remove)} title={actions.remove.label} aria-label={actions.remove.label}><Icon name="trash" /></button>
+        <button class="icon-btn" onclick={() => bulkRead(true)} title="Mark read" aria-label="Mark read"><Icon name="mail-open" /></button>
+        <button class="icon-btn" onclick={() => bulkRead(false)} title="Mark unread" aria-label="Mark unread"><Icon name="mail" /></button>
+      {:else if searchOpen || !ui.mobile}
+        {#if ui.mobile}
+          <button class="icon-btn" onclick={closeSearch} aria-label="Close search"><Icon name="chevron-left" size={24} /></button>
+        {:else}
+          <h1 class="title">{FOLDER_LABELS[folder]}</h1>
+        {/if}
+        <label class="search">
+          <Icon name="search" size={17} />
+          <input
+            bind:this={searchInput}
+            bind:value={query}
+            type="search"
+            placeholder="Search {FOLDER_LABELS[folder]}"
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+          {#if query}<button class="clear" onclick={() => { query = ""; searchInput?.focus(); }} aria-label="Clear search"><Icon name="x" size={16} /></button>{/if}
+        </label>
+        {#if !ui.mobile}
+          <button class="icon-btn" onclick={() => { void mail.refresh(folder); void mail.refreshCounts(); }} title="Refresh" aria-label="Refresh" disabled={box.loading}>
+            <span class:spinning={box.loading}><Icon name="refresh" size={18} /></span>
           </button>
         {/if}
-      </div>
+      {:else}
+        <button class="icon-btn" onclick={() => (ui.drawerOpen = true)} aria-label="Open menu"><Icon name="menu" size={22} /></button>
+        <h1 class="title">{FOLDER_LABELS[folder]}</h1>
+        {#if refreshing}<span class="spinning header-spinner"><Icon name="refresh" size={16} /></span>{/if}
+        <div class="spacer"></div>
+        <button class="icon-btn" onclick={() => { searchOpen = true; queueMicrotask(() => searchInput?.focus()); }} aria-label="Search"><Icon name="search" size={22} /></button>
+      {/if}
     </header>
 
-    {#if loading}
-      <!-- Skeleton loading -->
-      <div class="skeleton-list">
-        {#each Array(8) as _}
-          <div class="skeleton-row">
-            <div class="skel skel-dot"></div>
-            <div class="skel-content">
-              <div class="skel-top">
-                <div class="skel skel-from"></div>
-                <div class="skel skel-date"></div>
-              </div>
-              <div class="skel skel-subject"></div>
-              <div class="skel skel-preview"></div>
-            </div>
-          </div>
-        {/each}
+    {#if (folder === "trash" || folder === "spam") && box.emails.length && !search && !selecting}
+      <div class="folder-note">
+        <span>{folder === "trash" ? "Messages in Trash stay until you delete them." : "Spam stays until you delete it."}</span>
+        <button class="link" onclick={emptyFolder} disabled={emptying}>{emptying ? "Deleting…" : `Empty ${FOLDER_LABELS[folder]}`}</button>
       </div>
-    {:else if error}
-      <div class="state-msg error">{error}</div>
-    {:else if emails.length === 0}
-      {@const empty = FOLDER_EMPTY[folder] ?? { icon: "📭", title: "No messages", desc: "This folder is empty." }}
-      <div class="empty-state">
-        <span class="empty-icon">{empty.icon}</span>
-        <h3 class="empty-title">{empty.title}</h3>
-        <p class="empty-desc">{empty.desc}</p>
-        {#if empty.showCompose}
-          <a href="/mail/compose" class="btn btn-primary">Compose</a>
-        {/if}
-      </div>
-    {:else}
-      <div class="email-list">
-        {#each emails as email (email.messageId)}
-          <div
-            class="email-row"
-            class:unread={!email.read}
-            class:selected={selectedId === email.messageId}
-            onclick={() => openEmail(email.messageId)}
-            onkeydown={(e) => e.key === "Enter" && openEmail(email.messageId)}
-            tabindex="0"
-            role="button"
-          >
-            <!-- Unread dot -->
-            <div class="dot-col">
-              {#if !email.read}
-                <span class="unread-dot"></span>
-              {/if}
-            </div>
-
-            <div class="row-main">
-              <div class="row-top">
-                <span class="from">
-                  {email.from.name ?? email.from.address}
-                </span>
-                {#if email.starred}<span class="star" title="Starred">★</span>{/if}
-                {#if email.attachments?.length}<span class="attach-badge" title="Has attachments">📎</span>{/if}
-                <span class="date">{formatDate(email.receivedAt)}</span>
-              </div>
-              <div class="row-bottom">
-                <span class="subject">{email.subject}</span>
-                {#if email.bodyText}
-                  <span class="preview"> &mdash; {email.bodyText.slice(0, 80)}</span>
-                {/if}
-              </div>
-            </div>
-
-            <!-- Hover actions -->
-            <div class="hover-actions">
-              <button
-                class="action-btn"
-                onclick={(e) => toggleRead(e, email)}
-                title={email.read ? "Mark unread" : "Mark read"}
-                aria-label={email.read ? "Mark unread" : "Mark read"}
-              >
-                <span class="action-icon">{email.read ? "○" : "●"}</span>
-              </button>
-              <button
-                class="action-btn"
-                onclick={(e) => toggleStar(e, email)}
-                title={email.starred ? "Unstar" : "Star"}
-                aria-label={email.starred ? "Unstar" : "Star"}
-              >
-                <span class="action-icon" class:starred={email.starred}>{email.starred ? "★" : "☆"}</span>
-              </button>
-              <button
-                class="action-btn danger"
-                onclick={(e) => trashEmail(e, email)}
-                title="Delete"
-                aria-label="Delete"
-              >
-                <span class="action-icon">✕</span>
-              </button>
-            </div>
-          </div>
-        {/each}
-      </div>
-
-      {#if nextCursor}
-        <div class="load-more">
-          <button class="btn btn-ghost" onclick={loadMore} disabled={loadingMore}>
-            {loadingMore ? "Loading..." : "Load more"}
-          </button>
-        </div>
-      {/if}
     {/if}
-  </div>
 
-  <!-- Detail panel (desktop split-pane) -->
-  {#if selectedId !== null}
-    <div class="detail-panel">
-      {#if detailLoading}
-        <div class="detail-skeleton">
-          <div class="detail-skel-toolbar">
-            <div class="skel skel-btn"></div>
-            <div class="skel skel-btn"></div>
-            <div class="skel skel-btn"></div>
-          </div>
-          <div class="detail-skel-body">
-            <div class="skel skel-title"></div>
-            <div class="skel-sender-row">
-              <div class="skel skel-avatar"></div>
-              <div class="skel-sender-lines">
-                <div class="skel skel-line-md"></div>
-                <div class="skel skel-line-sm"></div>
-              </div>
-            </div>
-            <div class="skel-body-lines">
-              <div class="skel skel-line-full"></div>
-              <div class="skel skel-line-lg"></div>
-              <div class="skel skel-line-md"></div>
-              <div class="skel skel-line-lg"></div>
+    <div
+      class="list"
+      class:compact={!ui.mobile}
+      bind:this={listEl}
+      ontouchstart={touchstart}
+      ontouchmove={touchmove}
+      ontouchend={touchend}
+      role="list"
+    >
+      <div class="ptr" style:height="{pull}px" class:armed={pull >= PULL_TRIGGER} aria-hidden="true">
+        <span style:transform="rotate({pull * 3}deg)"><Icon name="refresh" size={20} /></span>
+      </div>
+
+      {#if showSkeleton}
+        {#each Array(8) as _, i (i)}
+          <div class="skel-row">
+            <div class="skel" style="width: 40px; height: 40px; border-radius: 50%"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 8px">
+              <div class="skel" style="width: 40%; height: 14px"></div>
+              <div class="skel" style="width: 75%; height: 12px"></div>
+              <div class="skel" style="width: 90%; height: 12px"></div>
             </div>
           </div>
+        {/each}
+      {:else if box.error && !emails.length && !search}
+        <div class="empty">
+          <p class="empty-title">Couldn't load {FOLDER_LABELS[folder]}</p>
+          <p class="empty-desc">{box.error}</p>
+          <button class="btn btn-ghost" onclick={() => mail.refresh(folder)}>Try again</button>
         </div>
-      {:else if detailError}
-        <div class="state-msg error">{detailError}</div>
-      {:else if selectedEmail}
-        <!-- Toolbar -->
-        <header class="detail-toolbar">
-          <div class="detail-toolbar-left">
-            <button class="btn btn-ghost icon-btn" onclick={detailReply} title="Reply" aria-label="Reply">↩</button>
-            <span class="toolbar-divider"></span>
-            <button class="btn btn-ghost icon-btn" onclick={detailToggleStar} title={selectedEmail.starred ? "Unstar" : "Star"} aria-label={selectedEmail.starred ? "Unstar" : "Star"}>
-              <span class:starred={selectedEmail.starred}>{selectedEmail.starred ? "★" : "☆"}</span>
-            </button>
-            <button class="btn btn-ghost icon-btn danger" onclick={detailMoveToTrash} title="Move to trash" aria-label="Move to trash">✕</button>
-          </div>
-          <button class="btn btn-ghost icon-btn" onclick={closePanel} title="Close" aria-label="Close">✕</button>
-        </header>
-
-        <!-- Email content -->
-        <div class="detail-content">
-          <h1 class="detail-subject">{selectedEmail.subject}</h1>
-
-          <div class="sender-block">
-            <div class="avatar" style="background: {senderColor(selectedEmail)}">
-              {senderInitial(selectedEmail)}
-            </div>
-            <div class="sender-info">
-              <div class="sender-name">
-                {selectedEmail.from.name ? `${selectedEmail.from.name}` : selectedEmail.from.address}
-              </div>
-              <div class="sender-meta">
-                To: {selectedEmail.to.map(a => a.name ?? a.address).join(", ")}
-                {#if selectedEmail.cc?.length}
-                  <span class="cc-label">CC: {selectedEmail.cc.map(a => a.address).join(", ")}</span>
-                {/if}
-              </div>
-            </div>
-            <span class="detail-date">{formatFull(selectedEmail.receivedAt)}</span>
-          </div>
-
-          <div class="detail-body">
-            {#if selectedEmail.bodyHtml}
-              <div class="html-body-wrap">
-                <iframe
-                  bind:this={iframeEl}
-                  class="html-body"
-                  title="Email body"
-                  srcdoc={injectIframeStyles(selectedEmail.bodyHtml)}
-                  sandbox="allow-popups"
-                ></iframe>
-              </div>
-            {:else}
-              <pre class="text-body">{selectedEmail.bodyText ?? "(no body)"}</pre>
-            {/if}
-          </div>
-
-          {#if selectedEmail.attachments?.length}
-            <div class="attachments">
-              <h3>Attachments</h3>
-              <div class="attachment-grid">
-                {#each selectedEmail.attachments as att}
-                  <button class="attachment-chip" onclick={() => openAttachment(att.s3Key)}>
-                    <span class="att-icon">📎</span>
-                    <span class="att-name">{att.filename}</span>
-                    <span class="att-size">{Math.ceil(att.size / 1024)} KB</span>
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
+      {:else if search && !emails.length}
+        <div class="empty">
+          {#if search.loading}<span class="spinning"><Icon name="refresh" size={22} /></span>
+          {:else}<p class="empty-title">No results for "{search.q}"</p><p class="empty-desc">Search covers sender, recipients, subject and preview text in {FOLDER_LABELS[folder]}.</p>{/if}
         </div>
+      {:else if !emails.length}
+        <div class="empty">
+          <span class="empty-icon"><Icon name={folder === "sent" ? "send" : folder === "inbox" ? "check" : folder} size={30} /></span>
+          <p class="empty-title">{EMPTY[folder].title}</p>
+          <p class="empty-desc">{EMPTY[folder].desc}</p>
+        </div>
+      {:else}
+        {#each groups as group (group.label)}
+          <div class="group-label">{group.label}</div>
+          {#each group.items as email (email.messageId)}
+            <MessageRow
+              {email}
+              showRecipients={folder === "sent"}
+              active={email.messageId === openId}
+              checked={selection.has(email.messageId)}
+              {selecting}
+              swipeRight={actions.primary ? { icon: actions.primary.icon, label: actions.primary.label, color: "var(--swipe-archive)" } : undefined}
+              swipeLeft={{ icon: "trash", label: actions.remove.label, color: "var(--swipe-trash)" }}
+              onopen={() => open(email.messageId)}
+              oncheck={() => toggleCheck(email.messageId)}
+              onswipe={dir => swipe(email, dir)}
+              onstar={() => mail.setStarred(email.messageId, !email.starred)}
+              onread={() => mail.setRead([email.messageId], !email.read)}
+            />
+          {/each}
+        {/each}
+        {#if (search ? search.cursor : box.cursor)}
+          <div class="more"><span class="spinning"><Icon name="refresh" size={18} /></span></div>
+        {/if}
       {/if}
+      <div bind:this={sentinel} class="sentinel"></div>
     </div>
+
+    {#if ui.mobile && !selecting}
+      <a href="/mail/compose" class="fab" aria-label="Compose"><Icon name="compose" size={22} /></a>
+    {/if}
+  </section>
+
+  {#if openId}
+    {#key ui.mobile}
+      <section
+        class="read-pane"
+        aria-label="Message"
+        class:settling={backSettling}
+        style:transform={backDx ? `translateX(${backDx}px)` : undefined}
+        in:fly={{ x: ui.mobile ? innerWidth : 0, duration: ui.mobile ? 260 : 0, opacity: 1, easing: cubicOut }}
+        ontouchstart={backStart}
+        ontouchmove={backMove}
+        ontouchend={backEnd}
+        ontransitionend={backSettled}
+      >
+        <MessageView
+          id={openId}
+          {folder}
+          mobile={ui.mobile}
+          onclose={close}
+          onnavigate={step}
+          onaction={afterOpenRemoved}
+          hasPrev={openIndex > 0}
+          hasNext={openIndex >= 0 && openIndex < emails.length - 1}
+        />
+      </section>
+    {/key}
+  {:else if !ui.mobile}
+    <section class="read-pane placeholder">
+      <Icon name="mail" size={40} strokeWidth={1.5} />
+      <p>Select a message to read</p>
+      <p class="hint">J and K move between messages, E archives, R replies</p>
+    </section>
   {/if}
 </div>
 
 <style>
-  /* ── Layout ─────────────────────────────────────────────────────── */
-  .inbox {
+  .mailbox {
+    position: relative;
     display: flex;
     height: 100%;
     overflow: hidden;
   }
 
-  .list-col {
+  .list-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    transition: flex 0.2s ease;
-  }
-
-  .inbox.has-panel .list-col {
-    flex: 0 0 380px;
+    width: 400px;
+    flex-shrink: 0;
     border-right: 1px solid var(--border);
+    background: var(--bg-surface);
+    min-height: 0;
   }
+  @media (max-width: 1100px) { .list-pane { width: 340px; } }
 
-  .detail-panel {
-    flex: 1;
+  .read-pane { flex: 1; min-width: 0; height: 100%; }
+  .placeholder {
     display: flex;
     flex-direction: column;
-    min-width: 0;
-    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
     background: var(--bg-base);
   }
+  .placeholder p { font-size: 15px; }
+  .placeholder .hint { font-size: 12px; }
 
-  /* ── Toolbar ────────────────────────────────────────────────────── */
-  .toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
-    flex-shrink: 0;
-  }
-  .toolbar-actions { display: flex; align-items: center; gap: 4px; }
-  .toolbar .danger { color: var(--danger); }
-  .folder-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .icon-btn {
-    padding: 6px 10px;
-    font-size: 16px;
-    line-height: 1;
-    border-radius: var(--radius-sm);
-  }
-
-  .refresh-icon {
-    display: inline-block;
-    transition: transform 0.3s ease;
-  }
-  .refresh-icon.spinning {
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ── Skeleton loading ───────────────────────────────────────────── */
-  .skeleton-list {
-    padding: 4px 0;
-  }
-  .skeleton-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 20px;
-  }
-  .skel {
-    background: var(--bg-raised);
-    border-radius: 4px;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.8; }
-  }
-  .skel-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-  .skel-content { flex: 1; display: flex; flex-direction: column; gap: 8px; }
-  .skel-top { display: flex; align-items: center; justify-content: space-between; }
-  .skel-from { width: 120px; height: 14px; }
-  .skel-date { width: 50px; height: 12px; }
-  .skel-subject { width: 80%; height: 14px; }
-  .skel-preview { width: 60%; height: 12px; }
-
-  /* ── Empty states ───────────────────────────────────���───────────── */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 80px 24px;
-    text-align: center;
-    flex: 1;
-  }
-  .empty-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.7;
-  }
-  .empty-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 6px;
-  }
-  .empty-desc {
-    font-size: 14px;
-    color: var(--text-muted);
-    max-width: 280px;
-    margin-bottom: 20px;
-    line-height: 1.5;
-  }
-
-  /* ── State messages ─────────────────────────────────────────────── */
-  .state-msg {
-    padding: 60px 20px;
-    text-align: center;
-    color: var(--text-secondary);
-  }
-  .state-msg.error { color: var(--danger); }
-
-  /* ── Email list ─────────────────────────────────────────────────── */
-  .email-list {
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .email-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    transition: background 0.1s;
-    color: var(--text-secondary);
-    position: relative;
-  }
-  .email-row:hover { background: var(--bg-hover); }
-  .email-row.unread {
-    background: var(--bg-raised);
-    color: var(--text-primary);
-  }
-  .email-row.selected {
-    background: var(--accent-dim);
-  }
-
-  /* Unread dot */
-  .dot-col {
-    width: 10px;
-    flex-shrink: 0;
-    display: flex;
-    justify-content: center;
-  }
-  .unread-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-
-  /* Row content */
-  .row-main { flex: 1; min-width: 0; }
-  .row-top {
+  .list-header {
     display: flex;
     align-items: center;
     gap: 6px;
+    height: var(--header-h);
+    padding: 0 8px 0 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
-  .from {
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .title {
+    font-size: 18px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
     white-space: nowrap;
+  }
+  .selection-count { font-size: 17px; padding-left: 4px; }
+  .spacer { flex: 1; }
+  .header-spinner { color: var(--text-muted); margin-left: 4px; }
+
+  .search {
     flex: 1;
     min-width: 0;
-  }
-  .email-row.unread .from { font-weight: 600; color: var(--text-primary); }
-  .star { color: var(--warning); font-size: 13px; flex-shrink: 0; }
-  .attach-badge { font-size: 12px; flex-shrink: 0; opacity: 0.7; }
-  .date {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .row-bottom {
-    margin-top: 2px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .subject { font-size: 13px; }
-  .email-row.unread .subject { font-weight: 500; color: var(--text-primary); }
-  .preview { color: var(--text-muted); font-size: 13px; }
-
-  /* Hover actions */
-  .hover-actions {
-    display: none;
-    align-items: center;
-    gap: 2px;
-    flex-shrink: 0;
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--bg-hover);
-    border-radius: var(--radius-sm);
-    padding: 2px;
-    box-shadow: var(--shadow);
-  }
-  .email-row:hover .hover-actions { display: flex; }
-
-  .action-btn {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
+    gap: 8px;
+    height: 38px;
+    padding: 0 6px 0 12px;
+    border-radius: 99px;
+    background: var(--bg-raised);
+    color: var(--text-muted);
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
     padding: 0;
-    color: var(--text-secondary);
-    border-radius: var(--radius-sm);
-    line-height: 1;
-  }
-  .action-btn:hover { background: var(--bg-raised); color: var(--text-primary); }
-  .action-btn.danger:hover { color: var(--danger); }
-  .action-icon {
     font-size: 14px;
-    line-height: 1;
-    display: inline-block;
   }
-  .action-icon.starred { color: var(--warning); }
+  .search input::-webkit-search-cancel-button { display: none; }
+  .search input:focus-visible { outline: none; }
+  .search:focus-within { box-shadow: inset 0 0 0 2px var(--border-focus); }
+  .clear { display: flex; padding: 4px; color: var(--text-muted); }
 
-  .load-more { padding: 16px; text-align: center; }
-
-  /* ── Detail panel ───────────────────────────────────────────────── */
-  .detail-toolbar {
+  .folder-note {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
+    background: var(--bg-raised);
+    color: var(--text-secondary);
+    font-size: 12px;
     flex-shrink: 0;
   }
-  .detail-toolbar-left { display: flex; align-items: center; gap: 4px; }
-  .toolbar-divider {
-    width: 1px;
-    height: 20px;
-    background: var(--border);
-    margin: 0 4px;
-  }
-  .starred { color: var(--warning); }
-  .detail-toolbar .danger { color: var(--danger); }
+  .link { color: var(--accent); font-weight: 600; white-space: nowrap; }
 
-  /* Detail skeleton */
-  .detail-skeleton { padding: 0; }
-  .detail-skel-toolbar {
-    display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--bg-surface);
-  }
-  .skel-btn { width: 32px; height: 32px; border-radius: var(--radius-sm); }
-  .detail-skel-body { padding: 24px 28px; }
-  .skel-title { width: 60%; height: 22px; margin-bottom: 20px; }
-  .skel-sender-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-  .skel-avatar { width: 40px; height: 40px; border-radius: 50%; }
-  .skel-sender-lines { display: flex; flex-direction: column; gap: 6px; flex: 1; }
-  .skel-line-sm { width: 100px; height: 12px; }
-  .skel-line-md { width: 180px; height: 14px; }
-  .skel-line-lg { width: 85%; height: 12px; }
-  .skel-line-full { width: 100%; height: 12px; }
-  .skel-body-lines { display: flex; flex-direction: column; gap: 10px; }
-
-  /* Detail content */
-  .detail-content {
+  .list {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    padding: 24px 28px;
+    overscroll-behavior-y: none;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .detail-subject {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 20px;
-    line-height: 1.3;
-  }
-
-  /* Sender block with avatar */
-  .sender-block {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 20px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-  }
-  .avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
+  .ptr {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-  }
-  .sender-info {
-    flex: 1;
-    min-width: 0;
-  }
-  .sender-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .sender-meta {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .cc-label { margin-left: 8px; }
-  .detail-date {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
-  /* Email body */
-  .detail-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .html-body-wrap {
-    border-radius: var(--radius);
     overflow: hidden;
-    border: 1px solid var(--border);
-    flex: 1;
-    min-height: 200px;
-    display: flex;
-    flex-direction: column;
+    color: var(--text-muted);
+    transition: height 0.2s ease-out;
   }
-  .html-body {
-    width: 100%;
-    flex: 1;
-    min-height: 200px;
-    border: none;
-    background: var(--bg-surface);
-    display: block;
-  }
-  .text-body {
-    white-space: pre-wrap;
-    font-family: var(--font-sans);
-    font-size: 14px;
-    color: var(--text-primary);
-    line-height: 1.7;
-    padding: 4px 0;
-  }
+  .ptr.armed { color: var(--accent); }
 
-  /* Attachments */
-  .attachments {
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-  }
-  .attachments h3 {
+  .group-label {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 6px 16px;
     font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 10px;
+    background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
   }
-  .attachment-grid {
+
+  .skel-row { display: flex; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+
+  .empty {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 72px 32px;
+    color: var(--text-muted);
   }
-  .attachment-chip {
+  .empty-icon {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    margin-bottom: 8px;
+    border-radius: 50%;
     background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
     color: var(--text-secondary);
-    font-size: 13px;
-    transition: background 0.15s, border-color 0.15s;
   }
-  .attachment-chip:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-    color: var(--text-primary);
-  }
-  .att-icon { font-size: 14px; }
-  .att-name { font-weight: 500; }
-  .att-size { color: var(--text-muted); font-size: 12px; }
+  .empty-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+  .empty-desc { font-size: 14px; max-width: 280px; }
 
-  /* ── Mobile ─────────────────────────────────────────────────────── */
+  .more { display: flex; justify-content: center; padding: 20px; color: var(--text-muted); }
+  .sentinel { height: 1px; }
+
+  .fab {
+    position: absolute;
+    right: 18px;
+    bottom: calc(18px + var(--safe-bottom));
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    background: var(--accent);
+    color: var(--text-on-accent);
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.15s;
+  }
+  .fab:active { transform: scale(0.94); }
+  .fab:hover { color: var(--text-on-accent); }
+
   @media (max-width: 767px) {
-    .inbox.has-panel .list-col {
-      flex: 1;
-      border-right: none;
+    .list-pane { width: 100%; border-right: none; }
+    .list-header {
+      height: calc(var(--header-h) + var(--safe-top));
+      padding: var(--safe-top) 6px 0 4px;
     }
-    .hidden-mobile { display: none; }
-    .detail-panel { display: none; }
-    .hover-actions { display: none !important; }
-    .email-row { padding: 10px 14px; }
-    .preview { display: none; }
+    .title { font-size: 21px; }
+    .list { padding-bottom: calc(88px + var(--safe-bottom)); }
+    .read-pane {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      box-shadow: var(--shadow-lg);
+    }
+    .read-pane.settling { transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
   }
-
-  /* Compact rows when panel is open */
-  .inbox.has-panel .email-row { padding: 8px 14px; }
-  .inbox.has-panel .from { font-size: 13px; }
-  .inbox.has-panel .subject { font-size: 12px; }
-  .inbox.has-panel .preview { display: none; }
 </style>

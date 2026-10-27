@@ -129,6 +129,7 @@
 
 <div class="setup-page">
   <header class="page-header">
+    <a href="/mail" class="back">← Mail</a>
     <h1>Setup & DNS Wizard</h1>
     <button class="btn btn-ghost" onclick={load} disabled={loading}>↺ Refresh</button>
   </header>
@@ -374,15 +375,16 @@
   .setup-page {
     max-width: 800px;
     margin: 0 auto;
-    padding: 28px 24px;
+    padding: calc(20px + var(--safe-top)) 20px calc(28px + var(--safe-bottom));
     display: flex;
     flex-direction: column;
     gap: 20px;
     overflow-y: auto;
     height: 100%;
   }
-  .page-header { display: flex; align-items: center; justify-content: space-between; }
-  .page-header h1 { font-size: 20px; font-weight: 700; }
+  .page-header { display: flex; align-items: center; gap: 16px; }
+  .page-header h1 { flex: 1; font-size: 20px; font-weight: 700; }
+  .back { font-weight: 500; white-space: nowrap; }
 
   .state-msg { padding: 60px; text-align: center; color: var(--text-secondary); }
   .state-msg.error { color: var(--danger); }
