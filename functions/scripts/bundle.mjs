@@ -9,7 +9,7 @@
 
 import { build } from "esbuild";
 import { mkdirSync, createWriteStream } from "fs";
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -54,7 +54,7 @@ console.log("\nAll handlers bundled into functions/dist-zip/");
 function zipDir(srcDir, destZip) {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(destZip);
-    const archive = archiver("zip", { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     output.on("close", resolve);
     archive.on("error", reject);
     archive.pipe(output);

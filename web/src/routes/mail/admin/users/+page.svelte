@@ -1,7 +1,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { auth } from "$lib/stores/auth.svelte";
-  import * as api from "$lib/api/client";
+  import { auth } from "#lib/stores/auth.svelte.ts";
+  import * as api from "#lib/api/client.ts";
+  import PageHeader from "#lib/components/PageHeader.svelte";
   import type { UserPublic } from "@dork-mail/shared";
 
   // Redirect non-admins
@@ -77,8 +78,9 @@
   }
 </script>
 
+<PageHeader title="Users" />
+<div class="scroll">
 <div class="page">
-  <h1 class="page-title">User Management</h1>
 
   {#if loading}
     <p class="muted">Loading…</p>
@@ -159,21 +161,20 @@
     </button>
   </section>
 </div>
+</div>
 
 <style>
-  .page {
-    padding: 32px;
-    max-width: 640px;
+  .scroll {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    height: 100%;
-    box-sizing: border-box;
+    background: var(--bg-base);
   }
 
-  .page-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 24px;
+  .page {
+    padding: 24px 24px calc(24px + var(--safe-bottom));
+    max-width: 640px;
+    margin: 0 auto;
   }
 
   .card {
@@ -255,14 +256,14 @@
   }
 
   .btn-sm { font-size: 12px; padding: 4px 10px; }
-  .btn-danger { color: #e55; }
-  .btn-danger:hover { background: rgba(238, 85, 85, 0.1); }
+  .btn-danger { color: var(--danger); background: transparent; }
+  .btn-danger:hover { background: var(--danger-dim); }
 
   .row-error {
     width: 100%;
     margin: 4px 0 0;
     font-size: 12px;
-    color: #e55;
+    color: var(--danger);
   }
 
   .form-grid {
@@ -317,5 +318,5 @@
 
   .muted   { color: var(--text-muted); font-size: 14px; }
   .success { color: var(--accent); font-size: 13px; margin: 0 0 12px; }
-  .error   { color: #e55; font-size: 13px; margin: 0 0 12px; }
+  .error   { color: var(--danger); font-size: 13px; margin: 0 0 12px; }
 </style>

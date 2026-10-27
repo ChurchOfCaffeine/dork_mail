@@ -8,5 +8,7 @@
     "api-dns": "dork-mail-api-dns"
   },
   "web_bucket": "dork-mail-web-123456789012",
-  "cloudfront_distribution": "EXXXXXXXXXXXX"
+  "cloudfront_distribution": "EXXXXXXXXXXXX",
+  "table": "dork-mail-data",
+  "email_bucket": "dork-mail-emails-123456789012"
 }

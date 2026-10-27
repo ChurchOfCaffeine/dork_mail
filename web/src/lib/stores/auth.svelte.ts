@@ -74,6 +74,11 @@ export const auth = {
     localStorage.removeItem("token");
     localStorage.removeItem("userEmail");
     localStorage.removeItem("displayName");
+    // Cached message lists, drafts and contacts belong to this user
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("dm:") && key !== "dm:theme") localStorage.removeItem(key);
+    }
+    if ("clearAppBadge" in navigator) navigator.clearAppBadge().catch(() => {});
     _state.token = null;
     _state.email = null;
     _state.displayName = null;

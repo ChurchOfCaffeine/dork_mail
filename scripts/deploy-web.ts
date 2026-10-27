@@ -40,8 +40,8 @@ const MIME_TYPES: Record<string, string> = {
 function cacheControl(key: string): string {
   // SvelteKit puts content-hashed assets here — safe to cache forever
   if (key.startsWith("_app/immutable/")) return "public, max-age=31536000, immutable";
-  // Entry points must always revalidate
-  if (key.endsWith(".html") || key === "service-worker.js") return "no-cache";
+  // Entry points must always revalidate, or installed PWAs keep running the old build
+  if (key.endsWith(".html") || key.endsWith(".webmanifest") || key === "service-worker.js") return "no-cache";
   return "public, max-age=3600";
 }
 

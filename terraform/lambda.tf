@@ -13,6 +13,8 @@ locals {
     HOSTED_ZONE_ID          = local.hosted_zone_id
     SES_INBOUND_EP          = local.ses_inbound_ep
     JWT_SECRET_PARAM        = aws_ssm_parameter.jwt_secret.name
+    VAPID_PARAM             = local.push_enabled ? local.vapid_param : ""
+    SES_CONFIG_SET          = aws_ses_configuration_set.main.name
     WEB_ORIGIN              = "https://${local.web_fqdn}"
     POWERTOOLS_SERVICE_NAME = "dork-mail"
     LOG_LEVEL               = "INFO"
@@ -52,22 +54,14 @@ resource "aws_lambda_function" "email_ingest" {
   }
 }
 
-resource "aws_lambda_permission" "email_ingest_s3" {
-  statement_id  = "AllowS3Invoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.email_ingest.function_name
-  principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.emails.arn
-}
-
-resource "aws_s3_bucket_notification" "email_ingest" {
-  bucket = aws_s3_bucket.emails.id
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.email_ingest.arn
-    events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = "incoming/"
-  }
-  depends_on = [aws_lambda_permission.email_ingest_s3]
+# Invoked by the receipt rule in ses.tf, which carries the envelope recipients
+# and spam verdicts that an S3 put notification doesn't.
+resource "aws_lambda_permission" "email_ingest_ses" {
+  statement_id   = "AllowSESInvoke"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.email_ingest.function_name
+  principal      = "ses.amazonaws.com"
+  source_account = data.aws_caller_identity.current.account_id
 }
 
 # ─── Authorizer ───────────────────────────────────────────────────────────────
@@ -86,6 +80,7 @@ resource "aws_lambda_function" "authorizer" {
   environment {
     variables = {
       JWT_SECRET_PARAM        = aws_ssm_parameter.jwt_secret.name
+      TABLE_NAME              = aws_dynamodb_table.main.name
       POWERTOOLS_SERVICE_NAME = "dork-mail-authorizer"
       LOG_LEVEL               = "INFO"
     }

@@ -111,7 +111,13 @@ resource "aws_ses_receipt_rule" "store" {
     position          = 1
   }
 
-  depends_on = [aws_s3_bucket_policy.ses_put]
+  lambda_action {
+    function_arn    = aws_lambda_function.email_ingest.arn
+    invocation_type = "Event"
+    position        = 2
+  }
+
+  depends_on = [aws_s3_bucket_policy.ses_put, aws_lambda_permission.email_ingest_ses]
 }
 
 # ─── SES Configuration Set (for sending metrics) ──────────────────────────────

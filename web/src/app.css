@@ -1,32 +1,77 @@
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
 :root {
-  --bg-base:      #0f1117;
-  --bg-surface:   #1a1d27;
-  --bg-raised:    #22263a;
-  --bg-hover:     #2a2f45;
-  --border:       #2e3347;
+  --bg-base:      #f6f7fb;
+  --bg-surface:   #ffffff;
+  --bg-raised:    #eef0f6;
+  --bg-hover:     #e8eaf3;
+  --bg-overlay:   rgba(15, 17, 23, 0.4);
+  --border:       #e1e4ee;
   --border-focus: #5b6ad0;
 
-  --text-primary:   #e2e4f0;
-  --text-secondary: #8b90a8;
-  --text-muted:     #555c78;
+  --text-primary:   #171a24;
+  --text-secondary: #545a70;
+  --text-muted:     #8b90a3;
+  --text-on-accent: #ffffff;
 
-  --accent:       #5b6ad0;
-  --accent-hover: #6f7ee0;
-  --accent-dim:   rgba(91, 106, 208, 0.15);
+  --accent:       #4f5ec7;
+  --accent-hover: #4351b5;
+  --accent-dim:   rgba(91, 106, 208, 0.12);
 
-  --danger:       #d05b6a;
-  --success:      #5bd08a;
-  --warning:      #d0aa5b;
+  --danger:       #c8424f;
+  --danger-dim:   rgba(200, 66, 79, 0.12);
+  --success:      #2b9a5c;
+  --warning:      #c98a12;
 
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --swipe-archive: #2b9a5c;
+  --swipe-trash:   #c8424f;
 
-  --radius-sm: 4px;
-  --radius:    8px;
-  --radius-lg: 12px;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 14px;
+
+  --shadow:    0 1px 2px rgba(16, 20, 40, 0.06), 0 4px 16px rgba(16, 20, 40, 0.08);
+  --shadow-lg: 0 8px 32px rgba(16, 20, 40, 0.18);
+
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --header-h:    56px;
+
+  color-scheme: light;
+}
+
+/* app.html sets data-theme before first paint, resolving "system" from prefers-color-scheme */
+:root[data-theme="dark"] {
+  --bg-base:      #0f1117;
+  --bg-surface:   #161922;
+  --bg-raised:    #1e2230;
+  --bg-hover:     #252a3b;
+  --bg-overlay:   rgba(0, 0, 0, 0.55);
+  --border:       #262b3b;
+  --border-focus: #6f7ee0;
+
+  --text-primary:   #e4e6f1;
+  --text-secondary: #9aa0b8;
+  --text-muted:     #626a86;
+
+  --accent:       #7584ea;
+  --accent-hover: #8794f0;
+  --accent-dim:   rgba(117, 132, 234, 0.16);
+
+  --danger:       #e06674;
+  --danger-dim:   rgba(224, 102, 116, 0.14);
+  --success:      #4fc483;
+  --warning:      #e0b04f;
+
+  --swipe-archive: #2f8f58;
+  --swipe-trash:   #b8404e;
+
+  --shadow:    0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────────────── */
@@ -40,8 +85,12 @@ html, body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
 }
+
+body { overflow: hidden; }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); }
@@ -50,45 +99,65 @@ button {
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
+  color: inherit;
   border: none;
   background: none;
 }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 
 input, textarea, select {
   font-family: inherit;
   font-size: inherit;
-  background: var(--bg-raised);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   outline: none;
   transition: border-color 0.15s;
 }
-input:focus, textarea:focus, select:focus {
-  border-color: var(--border-focus);
+input:focus, textarea:focus, select:focus { border-color: var(--border-focus); }
+input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
+/* iOS zooms the page when focusing inputs under 16px; !important beats component-scoped sizes */
+@media (max-width: 767px), (pointer: coarse) {
+  input, textarea, select { font-size: 16px !important; }
 }
 
 /* ─── Utilities ──────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 16px;
+  min-height: 36px;
   border-radius: var(--radius-sm);
   font-weight: 500;
   transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
 }
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-}
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-ghost {
-  color: var(--text-secondary);
-  background: transparent;
-}
-.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-primary { background: var(--accent); color: var(--text-on-accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--text-on-accent); }
+.btn-ghost { color: var(--text-secondary); background: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .btn-danger { background: var(--danger); color: #fff; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+}
+.icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn.active { color: var(--accent); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--danger); }
 
 .badge {
   display: inline-block;
@@ -100,13 +169,23 @@ input:focus, textarea:focus, select:focus {
   color: var(--accent);
 }
 
-.divider {
-  height: 1px;
-  background: var(--border);
-  margin: 8px 0;
-}
+.divider { height: 1px; background: var(--border); margin: 8px 0; }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+}
+
+.skel {
+  background: var(--bg-raised);
+  border-radius: 4px;
+  animation: skel-pulse 1.4s ease-in-out infinite;
+}
+@keyframes skel-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin 0.8s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

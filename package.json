@@ -1,40 +1,25 @@
 {
   "name": "dork-mail",
   "private": true,
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@12.15.0",
   "scripts": {
     "build:functions": "pnpm --filter @dork-mail/functions build",
     "build:web": "pnpm --filter @dork-mail/web build",
     "build": "pnpm build:functions && pnpm build:web",
     "dev": "pnpm --filter @dork-mail/web dev",
     "gen-password-hash": "node scripts/gen-password-hash.mjs",
+    "gen-vapid-keys": "pnpm --filter @dork-mail/functions exec web-push generate-vapid-keys --json",
+    "backfill": "tsx functions/scripts/backfill.ts",
     "deploy:init": "tsx scripts/init-deploy-config.ts",
     "deploy:functions": "tsx scripts/deploy-functions.ts",
     "deploy:web": "tsx scripts/deploy-web.ts",
     "deploy:all": "pnpm deploy:functions && pnpm deploy:web"
   },
   "devDependencies": {
-    "@aws-sdk/client-cloudfront": "^3.1024.0",
-    "@aws-sdk/client-lambda": "^3.1024.0",
-    "@aws-sdk/client-s3": "^3.1024.0",
+    "@aws-sdk/client-cloudfront": "^3.1157.0",
+    "@aws-sdk/client-lambda": "^3.1157.0",
+    "@aws-sdk/client-s3": "^3.1157.0",
     "bcryptjs": "^3.0.3",
-    "tsx": "^4.19.4"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"],
-    "overrides": {
-      "cookie": ">=0.7.0",
-      "serialize-javascript": ">=7.0.5"
-    },
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "vite-plugin-pwa>vite": "8"
-      }
-    },
-    "allowedDeprecatedVersions": {
-      "sourcemap-codec": "1.4.8",
-      "source-map": "0.8.0-beta.0",
-      "glob": "10.5.0 || 11.1.0"
-    }
+    "tsx": "^4.23.15"
   }
 }

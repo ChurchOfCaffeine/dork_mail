@@ -1,10 +1,13 @@
 /**
- * Auth API: login and user management.
+ * Auth API: login, user management, and push subscriptions.
  * POST   /auth/login
  * GET    /auth/users              (admin)
  * POST   /auth/users              (admin)
  * PATCH  /auth/users/:email       (admin or self)
  * DELETE /auth/users/:email       (admin)
+ * GET    /push/key                VAPID public key, 404 when push is not configured
+ * POST   /push/subscribe
+ * POST   /push/unsubscribe
  */
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { Logger } from "@aws-lambda-powertools/logger";
@@ -18,11 +21,15 @@ import {
   PutCommand,
   UpdateCommand,
   DeleteCommand,
+  QueryCommand,
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import * as bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
-import type { User, UserPublic, AuthTokenPayload, ApiResponse } from "@dork-mail/shared";
+import isEmail from "validator/lib/isEmail";
+import type { User, UserPublic, AuthTokenPayload, PushSubscriptionRequest } from "@dork-mail/shared";
+import { json, parseBody, caller, withErrors } from "../lib/http";
+import { vapidKeys, pushSk } from "../lib/push";
 
 const logger = new Logger({ serviceName: "api-auth" });
 const tracer = new Tracer({ serviceName: "api-auth" });
@@ -33,8 +40,10 @@ const ddb = DynamoDBDocumentClient.from(dynamo);
 
 const TABLE = process.env.TABLE_NAME!;
 const JWT_PARAM = process.env.JWT_SECRET_PARAM!;
-const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
+const DOMAIN = process.env.MAIL_DOMAIN!.toLowerCase();
 const JWT_TTL_SECONDS = 60 * 60 * 24; // 1 day
+// Compared against when the user doesn't exist, so unknown and known emails take the same time.
+const DUMMY_HASH = "$2b$12$70/x0EV03M8ImIJbfT9m6.LK3oek5xYDpzTcuAeFMnOJTyvxWOoMO";
 
 /** Minimum 12 chars, at least one uppercase, one digit, one special char */
 function isStrongPassword(pwd: string): boolean {
@@ -44,13 +53,16 @@ function isStrongPassword(pwd: string): boolean {
     && /[^A-Za-z0-9]/.test(pwd);
 }
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+export const handler = withErrors(logger, async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const path = event.path;
   const method = event.httpMethod;
 
   if (method === "POST" && path.endsWith("/login")) return login(event);
   if (method === "GET"  && path.endsWith("/users")) return listUsers(event);
   if (method === "POST" && path.endsWith("/users")) return createUser(event);
+  if (method === "GET"  && path.endsWith("/push/key")) return pushKey();
+  if (method === "POST" && path.endsWith("/push/subscribe")) return pushSubscribe(event);
+  if (method === "POST" && path.endsWith("/push/unsubscribe")) return pushUnsubscribe(event);
 
   const userEmailMatch = path.match(/\/users\/([^/]+)$/);
   if (userEmailMatch) {
@@ -60,7 +72,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   }
 
   return json(404, { ok: false, error: "Not found" });
-};
+});
 
 async function login(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const body = parseBody<{ email: string; password: string }>(event.body);
@@ -75,7 +87,8 @@ async function login(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult
   }));
 
   const user = result.Item as User | undefined;
-  if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+  const passwordOk = await bcrypt.compare(body.password, user?.passwordHash ?? DUMMY_HASH);
+  if (!user || !passwordOk) {
     metrics.addMetric("LoginFailure", MetricUnit.Count, 1);
     metrics.publishStoredMetrics();
     // Same error for unknown user and wrong password — avoid enumeration
@@ -106,7 +119,7 @@ async function createUser(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
     return json(403, { ok: false, error: "Admin only" });
   }
 
-  const body = parseBody<{ email: string; password: string; displayName: string }>(event.body);
+  const body = parseBody<{ email: string; password: string; displayName: string; isAdmin?: boolean }>(event.body);
   if (!body?.email || !body?.password || !body?.displayName) {
     return json(400, { ok: false, error: "email, password, displayName required" });
   }
@@ -116,6 +129,9 @@ async function createUser(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
   }
 
   const email = body.email.toLowerCase().trim();
+  if (!isEmail(email) || !email.endsWith(`@${DOMAIN}`)) {
+    return json(400, { ok: false, error: `Email must be an address on ${DOMAIN}` });
+  }
   const now = new Date().toISOString();
   const passwordHash = await bcrypt.hash(body.password, 12);
 
@@ -126,14 +142,21 @@ async function createUser(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
     passwordHash,
     displayName: body.displayName,
     createdAt: now,
-    isAdmin: (body as any).isAdmin === true,
+    isAdmin: body.isAdmin === true,
   };
 
-  await ddb.send(new PutCommand({
-    TableName: TABLE,
-    Item: user,
-    ConditionExpression: "attribute_not_exists(pk)",
-  }));
+  try {
+    await ddb.send(new PutCommand({
+      TableName: TABLE,
+      Item: user,
+      ConditionExpression: "attribute_not_exists(pk)",
+    }));
+  } catch (err) {
+    if ((err as Error).name === "ConditionalCheckFailedException") {
+      return json(409, { ok: false, error: "User already exists" });
+    }
+    throw err;
+  }
 
   logger.info("User created", { email });
   return json(201, { ok: true, data: { email, displayName: body.displayName } });
@@ -225,24 +248,51 @@ async function deleteUser(event: APIGatewayProxyEvent, targetEmail: string): Pro
   const callerEmail = event.requestContext.authorizer?.userEmail as string;
   if (callerEmail === targetEmail) return json(400, { ok: false, error: "Cannot delete your own account" });
 
-  await ddb.send(new DeleteCommand({
+  const items = await ddb.send(new QueryCommand({
     TableName: TABLE,
-    Key: { pk: `user#${targetEmail}`, sk: "profile" },
+    KeyConditionExpression: "pk = :pk",
+    ExpressionAttributeValues: { ":pk": `user#${targetEmail}` },
+    ProjectionExpression: "pk, sk",
   }));
+  await Promise.all((items.Items ?? []).map(key =>
+    ddb.send(new DeleteCommand({ TableName: TABLE, Key: { pk: key.pk, sk: key.sk } })),
+  ));
 
   logger.info("User deleted", { targetEmail, by: callerEmail });
   return json(200, { ok: true });
 }
 
-function parseBody<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
+async function pushKey(): Promise<APIGatewayProxyResult> {
+  const keys = await vapidKeys();
+  if (!keys) return json(404, { ok: false, error: "Push notifications are not configured" });
+  return json(200, { ok: true, data: { publicKey: keys.publicKey } });
 }
 
-function json(status: number, body: ApiResponse): APIGatewayProxyResult {
-  return {
-    statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
-    body: JSON.stringify(body),
-  };
+async function pushSubscribe(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const { email } = caller(event);
+  const body = parseBody<PushSubscriptionRequest>(event.body);
+  if (!body?.endpoint?.startsWith("https://") || !body.keys?.p256dh || !body.keys?.auth) {
+    return json(400, { ok: false, error: "Invalid push subscription" });
+  }
+
+  await ddb.send(new PutCommand({
+    TableName: TABLE,
+    Item: {
+      pk: `user#${email}`,
+      sk: pushSk(body.endpoint),
+      endpoint: body.endpoint,
+      keys: { p256dh: body.keys.p256dh, auth: body.keys.auth },
+      createdAt: new Date().toISOString(),
+    },
+  }));
+  return json(200, { ok: true });
+}
+
+async function pushUnsubscribe(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const { email } = caller(event);
+  const body = parseBody<{ endpoint: string }>(event.body);
+  if (!body?.endpoint) return json(400, { ok: false, error: "endpoint required" });
+
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `user#${email}`, sk: pushSk(body.endpoint) } }));
+  return json(200, { ok: true });
 }

@@ -2,7 +2,7 @@
   import "../app.css";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { auth } from "$lib/stores/auth.svelte";
+  import { auth } from "#lib/stores/auth.svelte.ts";
 
   const PUBLIC_ROUTES = ["/login"];
 

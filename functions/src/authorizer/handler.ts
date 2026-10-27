@@ -6,12 +6,16 @@
 import { APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from "aws-lambda";
 import { Logger } from "@aws-lambda-powertools/logger";
 import { getParameter } from "@aws-lambda-powertools/parameters/ssm";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import * as jwt from "jsonwebtoken";
 import type { AuthTokenPayload } from "@dork-mail/shared";
 
 const logger = new Logger({ serviceName: "authorizer" });
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const JWT_PARAM = process.env.JWT_SECRET_PARAM!;
+const TABLE = process.env.TABLE_NAME!;
 
 export const handler = async (
   event: APIGatewayRequestAuthorizerEvent
@@ -26,6 +30,17 @@ export const handler = async (
   try {
     const secret = await getParameter(JWT_PARAM, { decrypt: true }) as string;
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AuthTokenPayload;
+
+    // The token outlives deletes and admin changes, so the current record decides.
+    const user = await ddb.send(new GetCommand({
+      TableName: TABLE,
+      Key: { pk: `user#${payload.sub}`, sk: "profile" },
+      ProjectionExpression: "isAdmin",
+    }));
+    if (!user.Item) {
+      logger.warn("Token for deleted user", { sub: payload.sub });
+      return deny(event.methodArn);
+    }
 
     logger.info("Authorized", { sub: payload.sub });
 
@@ -47,7 +62,7 @@ export const handler = async (
       },
       context: {
         userEmail: payload.sub,
-        isAdmin: String(payload.isAdmin),
+        isAdmin: String(user.Item.isAdmin === true),
       },
     };
   } catch (err) {

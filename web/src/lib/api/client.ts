@@ -10,7 +10,11 @@ import type {
   DnsCheckResult,
   DnsRecord,
   UserPublic,
+  UnreadCounts,
+  UploadResponse,
+  PushSubscriptionRequest,
 } from "@dork-mail/shared";
+import { auth } from "#lib/stores/auth.svelte.ts";
 
 const BASE = "/api";
 
@@ -19,11 +23,7 @@ function token(): string | null {
 }
 
 function clearAuthAndRedirect() {
-  if (typeof localStorage !== "undefined") {
-    localStorage.removeItem("token");
-    localStorage.removeItem("userEmail");
-    localStorage.removeItem("displayName");
-  }
+  auth.logout();
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
     window.location.href = "/login";
   }
@@ -33,7 +33,8 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  noAuth = false
+  noAuth = false,
+  keepalive = false,
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (!noAuth) {
@@ -41,24 +42,34 @@ async function request<T>(
     if (t) headers["Authorization"] = `Bearer ${t}`;
   }
 
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      keepalive,
+    });
+  } catch {
+    throw new Error(navigator.onLine ? "Network error" : "You're offline");
+  }
 
-  // API Gateway authorizer rejects expired/invalid tokens with 401 or 403
-  // and returns a raw { message } body, not our ApiResponse shape. Treat
-  // both as auth failures — don't surface as a generic error in the UI.
-  if (!noAuth && (res.status === 401 || res.status === 403)) {
+  let data: ApiResponse<T> | { message?: string } | null = null;
+  try {
+    data = await res.json();
+  } catch {
+    // non-JSON body, handled below
+  }
+
+  // The API Gateway authorizer rejects expired/invalid tokens with 401 or 403
+  // and a raw { message } body. Our handlers' own 403s carry `ok: false` and
+  // are ordinary errors.
+  if (!noAuth && (res.status === 401 || (res.status === 403 && !(data && "ok" in data)))) {
     clearAuthAndRedirect();
     throw new Error("Session expired. Please sign in again.");
   }
 
-  let data: ApiResponse<T>;
-  try {
-    data = await res.json();
-  } catch {
+  if (!data || !("ok" in data)) {
     throw new Error(`HTTP ${res.status}`);
   }
 
@@ -100,18 +111,27 @@ export async function deleteUser(email: string) {
 
 // ─── Mail ─────────────────────────────────────────────────────────────────────
 
-export async function listEmails(folder = "inbox", cursor?: string, limit = 50) {
+export async function listEmails(folder = "inbox", cursor?: string, limit = 50, q?: string) {
   const qs = new URLSearchParams({ folder, limit: String(limit) });
   if (cursor) qs.set("cursor", cursor);
+  if (q) qs.set("q", q);
   return request<ListEmailsResponse>("GET", `/mail?${qs}`);
+}
+
+export async function getUnreadCounts() {
+  return request<UnreadCounts>("GET", "/mail/counts");
 }
 
 export async function getEmail(messageId: string) {
   return request<StoredEmail>("GET", `/mail/${encodeURIComponent(messageId)}`);
 }
 
-export async function sendEmail(payload: SendEmailRequest) {
-  return request<{ messageId: string }>("POST", "/mail/send", payload);
+export async function sendEmail(payload: SendEmailRequest, keepalive = false) {
+  return request<{ messageId: string }>("POST", "/mail/send", payload, false, keepalive);
+}
+
+export async function createUpload(file: { filename: string; contentType: string; size: number }) {
+  return request<UploadResponse>("POST", "/mail/uploads", file);
 }
 
 export async function updateEmail(
@@ -127,10 +147,24 @@ export async function deleteEmail(messageId: string) {
   );
 }
 
-export async function getAttachmentUrl(messageId: string, s3Key: string) {
+export async function getAttachmentUrl(messageId: string, s3Key: string, inline = false) {
   return request<{ url: string }>(
-    "GET", `/mail/${encodeURIComponent(messageId)}/attachment/${encodeURIComponent(s3Key)}`
+    "GET", `/mail/${encodeURIComponent(messageId)}/attachment/${encodeURIComponent(s3Key)}${inline ? "?inline=1" : ""}`
   );
+}
+
+// ─── Push ─────────────────────────────────────────────────────────────────────
+
+export async function getPushKey() {
+  return request<{ publicKey: string }>("GET", "/push/key");
+}
+
+export async function pushSubscribe(sub: PushSubscriptionRequest) {
+  return request<void>("POST", "/push/subscribe", sub);
+}
+
+export async function pushUnsubscribe(endpoint: string) {
+  return request<void>("POST", "/push/unsubscribe", { endpoint });
 }
 
 // ─── DNS / Setup Wizard ───────────────────────────────────────────────────────

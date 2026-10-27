@@ -17,6 +17,7 @@ import {
   ListResourceRecordSetsCommand,
   ChangeResourceRecordSetsCommand,
   type ResourceRecordSet,
+  type RRType,
 } from "@aws-sdk/client-route-53";
 import {
   SESClient,
@@ -37,7 +38,8 @@ import {
   MailType,
   ContactLanguage,
 } from "@aws-sdk/client-sesv2";
-import type { DnsCheckResult, DnsRecord, DkimRecord, ApiResponse } from "@dork-mail/shared";
+import type { DnsCheckResult, DnsRecord, DkimRecord } from "@dork-mail/shared";
+import { json, parseBody, withErrors } from "../lib/http";
 
 const logger = new Logger({ serviceName: "api-dns" });
 const tracer = new Tracer({ serviceName: "api-dns" });
@@ -50,9 +52,8 @@ const DOMAIN = process.env.MAIL_DOMAIN!;
 const HOSTED_ZONE_ID = process.env.HOSTED_ZONE_ID!;
 const SES_INBOUND_ENDPOINT = process.env.SES_INBOUND_ENDPOINT!;
 const AWS_REGION = process.env.AWS_REGION ?? "us-east-1";
-const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+export const handler = withErrors(logger, async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const isAdmin = event.requestContext.authorizer?.isAdmin === "true";
   if (!isAdmin) return json(403, { ok: false, error: "Admin only" });
 
@@ -69,7 +70,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   if (method === "POST"   && path.endsWith("/request-production-access")) return requestProductionAccess(event);
 
   return json(404, { ok: false, error: "Not found" });
-};
+});
 
 // ─── DNS Check ────────────────────────────────────────────────────────────────
 
@@ -86,7 +87,9 @@ async function checkDns(): Promise<APIGatewayProxyResult> {
   const sesVer = await getSesVerification();
   const sesVerified = sesVer === "Success";
 
-  const issues: DnsRecord[] = [];
+  const issues: DnsRecord[] = dkim
+    .filter(r => !r.correct)
+    .map(({ selector, ...r }) => ({ ...r, ttl: 300 }));
 
   if (!mx.some(r => r.present && r.correct)) {
     issues.push({
@@ -134,15 +137,26 @@ async function applyDns(event: APIGatewayProxyEvent): Promise<APIGatewayProxyRes
   const body = parseBody<{ records: DnsRecord[] }>(event.body);
   if (!body?.records?.length) return json(400, { ok: false, error: "records array required" });
 
-  const changes = body.records.map(r => ({
-    Action: "UPSERT" as const,
-    ResourceRecordSet: {
-      Name: r.name,
-      Type: r.type as any,
-      TTL: r.ttl ?? 300,
-      ResourceRecords: [{ Value: r.value }],
-    },
-  }));
+  // UPSERT replaces the whole record set, so keep TXT values that aren't the one being fixed
+  // (site verification tokens and the like share the apex TXT set with SPF).
+  const existing = await getAllRecords();
+  const changes = body.records.map(r => {
+    let values = [r.value];
+    if (r.type === "TXT") {
+      const tag = txtTag(r.value);
+      const current = existing.find(e => e.Type === "TXT" && e.Name === r.name)?.ResourceRecords ?? [];
+      values = [...current.map(v => v.Value!).filter(v => txtTag(v) !== tag), r.value];
+    }
+    return {
+      Action: "UPSERT" as const,
+      ResourceRecordSet: {
+        Name: r.name,
+        Type: r.type as RRType,
+        TTL: r.ttl ?? 300,
+        ResourceRecords: values.map(Value => ({ Value })),
+      },
+    };
+  });
 
   await r53.send(new ChangeResourceRecordSetsCommand({
     HostedZoneId: HOSTED_ZONE_ID,
@@ -282,13 +296,18 @@ function checkMx(records: ResourceRecordSet[]): DnsRecord[] {
 }
 
 function checkSpf(records: ResourceRecordSet[]): DnsRecord | null {
-  const txt = records.find(
-    r => r.Type === "TXT" && r.Name === `${DOMAIN}.` &&
-      r.ResourceRecords?.some(rr => rr.Value?.includes("v=spf1"))
-  );
-  if (!txt) return null;
-  const value = txt.ResourceRecords![0].Value!;
-  return { type: "TXT", name: txt.Name!, value, ttl: txt.TTL, present: true, correct: value.includes("include:amazonses.com") };
+  return findSpf(records, `${DOMAIN}.`);
+}
+
+function findSpf(records: ResourceRecordSet[], name: string): DnsRecord | null {
+  const txt = records.find(r => r.Type === "TXT" && r.Name === name);
+  const value = txt?.ResourceRecords?.map(rr => rr.Value ?? "").find(v => txtTag(v) === "v=spf1");
+  if (!txt || !value) return null;
+  return { type: "TXT", name, value, ttl: txt.TTL, present: true, correct: value.includes("include:amazonses.com") };
+}
+
+function txtTag(value: string): string {
+  return value.replace(/^"/, "").split(/[;\s]/)[0].toLowerCase();
 }
 
 async function checkDkim(records: ResourceRecordSet[]): Promise<DkimRecord[]> {
@@ -310,13 +329,7 @@ function checkMailFromMx(records: ResourceRecordSet[]): DnsRecord | null {
 }
 
 function checkMailFromSpf(records: ResourceRecordSet[]): DnsRecord | null {
-  const rec = records.find(
-    r => r.Type === "TXT" && r.Name === `bounces.${DOMAIN}.` &&
-      r.ResourceRecords?.some(rr => rr.Value?.includes("v=spf1"))
-  );
-  if (!rec) return null;
-  const value = rec.ResourceRecords![0].Value!;
-  return { type: "TXT", name: rec.Name!, value, ttl: rec.TTL, present: true, correct: value.includes("include:amazonses.com") };
+  return findSpf(records, `bounces.${DOMAIN}.`);
 }
 
 function checkDmarc(records: ResourceRecordSet[]): DnsRecord | null {
@@ -334,17 +347,4 @@ async function getSesVerification(): Promise<string> {
 async function getSesDkim(): Promise<any> {
   const res = await ses.send(new GetIdentityDkimAttributesCommand({ Identities: [DOMAIN] }));
   return res.DkimAttributes?.[DOMAIN];
-}
-
-function parseBody<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
-}
-
-function json(status: number, body: ApiResponse): APIGatewayProxyResult {
-  return {
-    statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
-    body: JSON.stringify(body),
-  };
 }
