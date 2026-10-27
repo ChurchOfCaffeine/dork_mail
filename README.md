@@ -10,9 +10,10 @@ Built on AWS SES, DynamoDB, and Lambda — fully serverless, no VMs, no mail tra
 
 ## What it does
 
-- **Receives email** via SES receipt rules → stores raw `.eml` in S3 → parses and indexes into DynamoDB
-- **Sends email** via SES with full DKIM signing
-- **Web UI** — dark mode, Gmail-ish layout: inbox, compose, reply, attachments, labels, trash
+- **Receives email** via SES receipt rules → stores raw `.eml` in S3 → parses and indexes into DynamoDB. Mail is routed by envelope recipient, so Bcc and mailing list mail lands too, and `you+anything@domain` delivers to `you@domain`. SES spam and virus verdicts route to Spam.
+- **Sends email** via SES with full DKIM signing, attachments, and proper reply threading headers
+- **Web UI** — installable PWA with light and dark themes: inbox, archive, search, compose, reply, reply all, forward, attachments, swipe actions, keyboard shortcuts
+- **Push notifications** for new mail on the installed PWA, when VAPID keys are configured
 - **Setup wizard** — reads your Route 53 zone, identifies missing/incorrect DNS records (MX, SPF, DKIM, DMARC), and writes fixes with one click; manages SES verified emails for sandbox testing; submits production access requests
 - **Multi-user** — multiple mailboxes on a single domain, admin-controlled user management panel
 - **Account settings** — users can update their display name and change their own password
@@ -52,9 +53,12 @@ flowchart TD
         SES_OUT[SES Send]
     end
 
-    SES_IN -->|S3 Put| S3_EMAIL
-    S3_EMAIL -->|trigger| INGEST
+    SES_IN -->|S3 action| S3_EMAIL
+    SES_IN -->|Lambda action| INGEST
+    S3_EMAIL -->|raw .eml| INGEST
+    INGEST -->|attachments| S3_EMAIL
     INGEST -->|PutItem| DYNAMO
+    INGEST -->|Web Push| BROWSER
 
     BROWSER -->|HTTPS| CF
     CF -->|OAC| S3_WEB
@@ -99,12 +103,14 @@ All AWS SDK calls use **IAM execution roles** — no access keys in any applicat
 dork-mail/
 ├── terraform/              # All AWS infrastructure — intended for use as a module
 ├── functions/              # Lambda functions (TypeScript + AWS Powertools)
+│   ├── scripts/backfill.ts # Adds index attributes to existing mail (pnpm backfill)
 │   └── src/
-│       ├── email-ingest/   # S3 trigger: raw email → DynamoDB
+│       ├── email-ingest/   # SES receipt rule action: raw email → S3 parts + DynamoDB
 │       ├── authorizer/     # JWT Lambda authorizer for API Gateway
+│       ├── lib/            # Shared HTTP, mail storage, and push helpers
 │       └── api/
-│           ├── auth.ts     # Login, user CRUD (admin + self-service)
-│           ├── mail.ts     # List, read, send, update, delete, attachments
+│           ├── auth.ts     # Login, user CRUD (admin + self-service), push subscriptions
+│           ├── mail.ts     # List, search, read, send, update, delete, uploads, attachments
 │           └── dns.ts      # DNS check/apply, SES status, sandbox management
 ├── web/                    # SvelteKit frontend (dark mode)
 │   └── src/routes/
@@ -246,6 +252,8 @@ The setup wizard walks through all of this with live status indicators.
 | `admin_email` | yes | — | Initial admin user email |
 | `admin_password_hash` | yes | — | bcrypt hash of admin password |
 | `admin_display_name` | no | `Admin` | Display name for admin user |
+| `vapid_public_key` | no | `""` | Web Push public key from `pnpm gen-vapid-keys`. Push is off while empty. |
+| `vapid_private_key` | no | `""` | Web Push private key from the same output |
 | `web_subdomain` | no | `mail` | Subdomain prefix for the UI |
 | `aws_region` | no | `us-east-1` | Deployment region |
 | `ses_rule_set_name` | no | `dork-mail` | SES receipt rule set name |
@@ -278,6 +286,20 @@ To redeploy just one layer:
 pnpm deploy:all:functions   # Lambda only
 pnpm deploy:all:web         # S3 + CloudFront only
 ```
+
+### Reindexing mail
+
+`pnpm backfill` scans the table and adds the folder-index and search attributes to any mail item that lacks them. It also writes attachments for items whose attachment objects are missing from S3, re-parsing the raw `.eml` while it still exists (raw mail expires after 90 days). It reads `table` and `email_bucket` from `deploy.json` and is safe to re-run.
+
+Folder lists read from the `folder-index` GSI, so mail without those attributes doesn't show up in any folder until this runs.
+
+### Push notifications
+
+```sh
+pnpm gen-vapid-keys
+```
+
+Pass the two keys as `vapid_public_key` and `vapid_private_key` to the module and apply. Each user then turns on notifications from **Account** in the installed app. On iOS, push only works for the app added to the home screen.
 
 ### Adding or managing users
 
@@ -337,8 +359,9 @@ pnpm dev
 - **No access keys in app code** — all AWS SDK calls use Lambda execution roles
 - **JWT secret** stored in SSM Parameter Store as a SecureString, never in environment variables as plaintext
 - **S3 buckets** are fully private — web assets served only via CloudFront OAC, emails accessible only to Lambda roles
-- **Email HTML** is rendered in a sandboxed `<iframe>` with `sandbox="allow-same-origin"` to prevent script execution
-- **Attachment downloads** use short-lived (5 minute) S3 presigned URLs — no attachment bytes flow through Lambda
+- **Email HTML** is rendered in a sandboxed `<iframe>` without `allow-scripts`, with a CSP that blocks remote content until you choose to load it, so tracking pixels don't fire on open
+- **Attachment downloads** use short-lived (5 minute) S3 presigned URLs. Compose uploads go straight to S3 with presigned PUTs, so attachment bytes only pass through Lambda when a message is sent.
+- **Revoked access** takes effect within the 5 minute authorizer cache: the authorizer checks that the user still exists and reads admin status from the user record, not the token
 - **User enumeration** is prevented — login returns the same error for unknown user and wrong password
 - **Password strength** enforced server-side: minimum 12 characters, must include uppercase, digit, and special character
 - SES **TLS required** for all outbound sending (configured in the SES configuration set)
