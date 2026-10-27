@@ -16,22 +16,17 @@
     "deploy:all": "pnpm deploy:functions && pnpm deploy:web"
   },
   "devDependencies": {
-    "@aws-sdk/client-cloudfront": "^3.1024.0",
-    "@aws-sdk/client-lambda": "^3.1024.0",
-    "@aws-sdk/client-s3": "^3.1024.0",
+    "@aws-sdk/client-cloudfront": "^3.1157.0",
+    "@aws-sdk/client-lambda": "^3.1157.0",
+    "@aws-sdk/client-s3": "^3.1157.0",
     "bcryptjs": "^3.0.3",
-    "tsx": "^4.19.4"
+    "tsx": "^4.23.15"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"],
     "overrides": {
-      "cookie": ">=0.7.0",
+      "cookie@<0.7.0": "^0.7.0",
       "serialize-javascript": ">=7.0.5"
-    },
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "vite-plugin-pwa>vite": "8"
-      }
     },
     "allowedDeprecatedVersions": {
       "sourcemap-codec": "1.4.8",
