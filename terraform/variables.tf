@@ -44,6 +44,19 @@ variable "admin_display_name" {
   default     = "Admin"
 }
 
+variable "vapid_public_key" {
+  description = "Web Push VAPID public key. Generate with: pnpm gen-vapid-keys. Push notifications stay off while either key is empty."
+  type        = string
+  default     = ""
+}
+
+variable "vapid_private_key" {
+  description = "Web Push VAPID private key, from the same pnpm gen-vapid-keys output."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 
 variable "tags" {
   description = "Tags to apply to all resources."

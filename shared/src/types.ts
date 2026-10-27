@@ -5,6 +5,8 @@ export interface StoredEmail {
   pk: string;
   /** DynamoDB SK: "ts#<ISO8601>#<messageId>" — sorts chronologically */
   sk: string;
+  /** folder-index GSI hash key: "mailbox#<email>#<folder>" */
+  mailboxFolder: string;
 
   messageId: string;
   from: EmailAddress;
@@ -13,8 +15,16 @@ export interface StoredEmail {
   bcc?: EmailAddress[];
   replyTo?: EmailAddress[];
   subject: string;
+  /** First ~200 chars of the plain text body, for list previews */
+  snippet?: string;
+  /** Lowercased from/to/subject/snippet, matched by folder search */
+  searchText?: string;
   bodyText?: string;
   bodyHtml?: string;
+  /** S3 key of a JSON { bodyText, bodyHtml } object when the bodies are too large for DynamoDB */
+  bodyKey?: string;
+  inReplyTo?: string;
+  references?: string[];
   /** S3 keys for attachments */
   attachments?: Attachment[];
   /** S3 key of the raw .eml */
@@ -24,7 +34,6 @@ export interface StoredEmail {
   read: boolean;
   starred: boolean;
   labels: string[];
-  /** "inbox" | "sent" | "draft" | "trash" | "spam" */
   folder: MailFolder;
 
   /** For sent mail — SES message ID */
@@ -41,9 +50,20 @@ export interface Attachment {
   contentType: string;
   size: number;
   s3Key: string;
+  /** Content-ID without angle brackets, referenced as cid: from the HTML body */
+  contentId?: string;
+  /** Short-lived URL, only set on single-message responses for inline cid: images */
+  url?: string;
 }
 
-export type MailFolder = "inbox" | "sent" | "draft" | "trash" | "spam";
+export const MAIL_FOLDERS = ["inbox", "archive", "sent", "trash", "spam"] as const;
+export type MailFolder = (typeof MAIL_FOLDERS)[number];
+
+/** Fields returned by list queries. Bodies are only returned by the single-message endpoint. */
+export type EmailSummary = Pick<
+  StoredEmail,
+  "messageId" | "from" | "to" | "cc" | "subject" | "snippet" | "receivedAt" | "read" | "starred" | "labels" | "folder" | "attachments"
+>;
 
 // ─── User / Mailbox ───────────────────────────────────────────────────────────
 
@@ -128,6 +148,13 @@ export interface AuthTokenPayload {
   isAdmin: boolean;
 }
 
+export interface OutgoingAttachment {
+  /** An uploads/ key from POST /mail/uploads, or an attachment key of the forwardOf message */
+  s3Key: string;
+  filename: string;
+  contentType: string;
+}
+
 export interface SendEmailRequest {
   to: EmailAddress[];
   cc?: EmailAddress[];
@@ -135,17 +162,35 @@ export interface SendEmailRequest {
   subject: string;
   bodyText?: string;
   bodyHtml?: string;
-  replyToMessageId?: string;
+  /** messageId of the message being replied to; sets In-Reply-To and References */
+  inReplyTo?: string;
+  /** messageId of the message being forwarded; allows its attachments in `attachments` */
+  forwardOf?: string;
+  attachments?: OutgoingAttachment[];
 }
 
-export interface ListEmailsRequest {
-  mailbox: string;
-  folder?: MailFolder;
-  limit?: number;
-  cursor?: string;
+export interface UploadRequest {
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
+export interface UploadResponse {
+  s3Key: string;
+  uploadUrl: string;
 }
 
 export interface ListEmailsResponse {
-  emails: StoredEmail[];
+  emails: EmailSummary[];
   nextCursor?: string;
+}
+
+export interface UnreadCounts {
+  inbox: number;
+  spam: number;
+}
+
+export interface PushSubscriptionRequest {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
 }

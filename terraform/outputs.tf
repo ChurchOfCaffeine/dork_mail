@@ -11,6 +11,8 @@ output "deploy_config" {
     }
     web_bucket              = aws_s3_bucket.web.id
     cloudfront_distribution = aws_cloudfront_distribution.web.id
+    table                   = aws_dynamodb_table.main.name
+    email_bucket            = aws_s3_bucket.emails.id
   })
 }
 

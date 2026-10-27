@@ -1,8 +1,9 @@
 # Single table design — all entities share this table.
 # Access patterns:
-#   - List emails by mailbox+folder:  PK=mailbox#<email>  SK begins_with ts#
+#   - List emails by mailbox+folder:  folder-index  mailboxFolder=mailbox#<email>#<folder>, SK desc
+#   - Find email by Message-ID:       message-index PK=mailbox#<email>  messageId=<id>
 #   - Get user profile:               PK=user#<email>     SK=profile
-#   - Get mailbox config:             PK=mailbox#<email>  SK=config
+#   - List push subscriptions:        PK=user#<email>     SK begins_with push#
 
 resource "aws_dynamodb_table" "main" {
   name         = "${local.name_prefix}-data"
@@ -18,10 +19,34 @@ resource "aws_dynamodb_table" "main" {
     name = "sk"
     type = "S"
   }
+  attribute {
+    name = "mailboxFolder"
+    type = "S"
+  }
+  attribute {
+    name = "messageId"
+    type = "S"
+  }
 
-  # GSI for querying by folder efficiently
-  # GSI PK: pk  SK: folder#ts# (write as "folder#<folder>#<ts>#<id>")
-  # (Optional future optimisation — left as placeholder)
+  # Projects only what the message list renders, so list pages stay small.
+  # Must cover SUMMARY_FIELDS in functions/src/lib/mail-store.ts, plus searchText for search.
+  global_secondary_index {
+    name            = "folder-index"
+    hash_key        = "mailboxFolder"
+    range_key       = "sk"
+    projection_type = "INCLUDE"
+    non_key_attributes = [
+      "messageId", "from", "to", "cc", "subject", "snippet", "searchText",
+      "receivedAt", "read", "starred", "labels", "folder", "attachments",
+    ]
+  }
+
+  global_secondary_index {
+    name            = "message-index"
+    hash_key        = "pk"
+    range_key       = "messageId"
+    projection_type = "KEYS_ONLY"
+  }
 
   point_in_time_recovery {
     enabled = true

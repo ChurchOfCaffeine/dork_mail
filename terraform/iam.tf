@@ -35,10 +35,33 @@ resource "aws_iam_role_policy" "email_ingest_inline" {
         Resource = "${aws_s3_bucket.emails.arn}/incoming/*"
       },
       {
-        Sid      = "WriteEmailTable"
+        Sid    = "WriteParsedParts"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "${aws_s3_bucket.emails.arn}/attachments/*",
+          "${aws_s3_bucket.emails.arn}/bodies/*",
+        ]
+      },
+      {
+        Sid    = "EmailTable"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:Query",
+          "dynamodb:DeleteItem",
+        ]
+        Resource = [
+          aws_dynamodb_table.main.arn,
+          "${aws_dynamodb_table.main.arn}/index/*",
+        ]
+      },
+      {
+        Sid      = "ReadVapidKeys"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem"]
-        Resource = aws_dynamodb_table.main.arn
+        Action   = ["ssm:GetParameter"]
+        Resource = local.vapid_param_arn
       },
       {
         Sid      = "Xray"
@@ -73,6 +96,12 @@ resource "aws_iam_role_policy" "authorizer_inline" {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
         Resource = aws_ssm_parameter.jwt_secret.arn
+      },
+      {
+        Sid      = "ReadUsers"
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem"]
+        Resource = aws_dynamodb_table.main.arn
       },
       {
         Sid      = "Xray"
@@ -125,6 +154,16 @@ resource "aws_iam_role_policy" "api_inline" {
         Resource = "${aws_s3_bucket.emails.arn}/*"
       },
       {
+        Sid    = "S3EmailWrite"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "${aws_s3_bucket.emails.arn}/uploads/*",
+          "${aws_s3_bucket.emails.arn}/attachments/*",
+          "${aws_s3_bucket.emails.arn}/bodies/*",
+        ]
+      },
+      {
         Sid      = "SES"
         Effect   = "Allow"
         Action   = ["ses:SendEmail", "ses:SendRawEmail"]
@@ -160,7 +199,7 @@ resource "aws_iam_role_policy" "api_inline" {
         Sid      = "SSM"
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
-        Resource = aws_ssm_parameter.jwt_secret.arn
+        Resource = [aws_ssm_parameter.jwt_secret.arn, local.vapid_param_arn]
       },
       {
         Sid      = "Xray"

@@ -35,6 +35,26 @@ resource "aws_s3_bucket_lifecycle_configuration" "emails" {
     filter { prefix = "incoming/" }
     expiration { days = 90 }
   }
+
+  # Sending copies uploads into attachments/, so leftovers are abandoned drafts.
+  rule {
+    id     = "expire-uploads"
+    status = "Enabled"
+    filter { prefix = "uploads/" }
+    expiration { days = 1 }
+    abort_incomplete_multipart_upload { days_after_initiation = 1 }
+  }
+}
+
+# Compose uploads attachments straight to S3 with presigned PUTs from the web app.
+resource "aws_s3_bucket_cors_configuration" "emails" {
+  bucket = aws_s3_bucket.emails.id
+  cors_rule {
+    allowed_methods = ["PUT"]
+    allowed_origins = ["https://${local.web_fqdn}"]
+    allowed_headers = ["Content-Type"]
+    max_age_seconds = 3600
+  }
 }
 
 # Allow SES to write to the bucket
