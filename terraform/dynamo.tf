@@ -4,6 +4,9 @@
 #   - Find email by Message-ID:       message-index PK=mailbox#<email>  messageId=<id>
 #   - Get user profile:               PK=user#<email>     SK=profile
 #   - List push subscriptions:        PK=user#<email>     SK begins_with push#
+#   - Resolve an alias:               PK=alias#<address>  SK=alias
+#   - List a user's aliases:          PK=user#<email>     SK begins_with alias#
+#     (both alias items are written and deleted together in one transaction)
 
 resource "aws_dynamodb_table" "main" {
   name         = "${local.name_prefix}-data"

@@ -33,9 +33,9 @@ function htmlToText(html: string): string {
     .replace(/[͏​-‍⁠﻿­]/g, "");
 }
 
-export function makeSearchText(e: Pick<StoredEmail, "from" | "to" | "cc" | "subject" | "snippet">): string {
+export function makeSearchText(e: Pick<StoredEmail, "from" | "to" | "cc" | "subject" | "snippet" | "deliveredVia">): string {
   const addrs = [e.from, ...e.to, ...(e.cc ?? [])].flatMap(a => [a.name, a.address]);
-  return [...addrs, e.subject, e.snippet].filter(Boolean).join(" ").toLowerCase();
+  return [...addrs, e.deliveredVia, e.subject, e.snippet].filter(Boolean).join(" ").toLowerCase();
 }
 
 /** Inline bodies when they fit in the item, otherwise write them to S3 and return the key. */

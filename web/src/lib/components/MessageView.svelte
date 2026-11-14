@@ -174,6 +174,11 @@
             <span class="sender-to">to {recipientSummary(email)} <Icon name={showDetails ? "chevron-up" : "chevron-down"} size={14} /></span>
           </button>
         </div>
+        {#if email.deliveredVia}
+          <a class="via" href="/mail/aliases" title="Delivered through your alias {email.deliveredVia}">
+            <Icon name="at-sign" size={13} /> via {email.deliveredVia.split("@")[0]}
+          </a>
+        {/if}
 
         {#if showDetails}
           <dl class="details">
@@ -184,6 +189,7 @@
             <dt>To</dt><dd>{email.to.map(formatAddress).join(", ") || "(none)"}</dd>
             {#if email.cc?.length}<dt>Cc</dt><dd>{email.cc.map(formatAddress).join(", ")}</dd>{/if}
             {#if email.bcc?.length}<dt>Bcc</dt><dd>{email.bcc.map(formatAddress).join(", ")}</dd>{/if}
+            {#if email.deliveredVia}<dt>Via</dt><dd>{email.deliveredVia}</dd>{/if}
             <dt>Date</dt><dd>{fullDate(email.receivedAt)}</dd>
           </dl>
         {/if}
@@ -250,6 +256,22 @@
 </article>
 
 <style>
+  .via {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    /* Sits under the sender line, lined up past the 40px avatar and 12px gap. */
+    margin: -8px 0 16px 52px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .via:hover { text-decoration: underline; }
+
   .view {
     display: flex;
     flex-direction: column;

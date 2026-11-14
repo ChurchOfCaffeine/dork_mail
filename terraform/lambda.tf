@@ -16,6 +16,7 @@ locals {
     VAPID_PARAM             = local.push_enabled ? local.vapid_param : ""
     SES_CONFIG_SET          = aws_ses_configuration_set.main.name
     WEB_ORIGIN              = "https://${local.web_fqdn}"
+    MAX_ALIASES_PER_USER    = tostring(var.max_aliases_per_user)
     POWERTOOLS_SERVICE_NAME = "dork-mail"
     LOG_LEVEL               = "INFO"
   }

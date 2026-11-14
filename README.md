@@ -16,6 +16,7 @@ Built on AWS SES, DynamoDB, and Lambda — fully serverless, no VMs, no mail tra
 - **Push notifications** for new mail on the installed PWA, when VAPID keys are configured
 - **Setup wizard** — reads your Route 53 zone, identifies missing/incorrect DNS records (MX, SPF, DKIM, DMARC), and writes fixes with one click; manages SES verified emails for sandbox testing; submits production access requests
 - **Multi-user** — multiple mailboxes on a single domain, admin-controlled user management panel
+- **Aliases** — each user can create extra addresses (`promo-company@domain`, or a generated one like `quiet-otter-4821@domain`) that deliver to their own inbox, reply and send as them, and disable or delete them when they attract spam. Like iCloud's Hide My Email, but you pick the name.
 - **Account settings** — users can update their display name and change their own password
 - **JWT auth** — simple, stateless, no Cognito
 
@@ -109,7 +110,7 @@ dork-mail/
 │       ├── authorizer/     # JWT Lambda authorizer for API Gateway
 │       ├── lib/            # Shared HTTP, mail storage, and push helpers
 │       └── api/
-│           ├── auth.ts     # Login, user CRUD (admin + self-service), push subscriptions
+│           ├── auth.ts     # Login, user CRUD (admin + self-service), aliases, push subscriptions
 │           ├── mail.ts     # List, search, read, send, update, delete, uploads, attachments
 │           └── dns.ts      # DNS check/apply, SES status, sandbox management
 ├── web/                    # SvelteKit frontend (dark mode)
@@ -119,6 +120,7 @@ dork-mail/
 │       │   ├── [messageId]/    # Single message view
 │       │   ├── compose/        # Compose / reply
 │       │   ├── account/        # Account settings (display name, password)
+│       │   ├── aliases/        # Create, disable, and delete aliases
 │       │   └── admin/users/    # Admin user management panel
 │       └── setup/          # DNS wizard
 ├── shared/                 # Shared TypeScript types
@@ -254,6 +256,7 @@ The setup wizard walks through all of this with live status indicators.
 | `admin_display_name` | no | `Admin` | Display name for admin user |
 | `vapid_public_key` | no | `""` | Web Push public key from `pnpm gen-vapid-keys`. Push is off while empty. |
 | `vapid_private_key` | no | `""` | Web Push private key from the same output |
+| `max_aliases_per_user` | no | `0` | Most aliases a user can own. `0` means no limit. |
 | `web_subdomain` | no | `mail` | Subdomain prefix for the UI |
 | `aws_region` | no | `us-east-1` | Deployment region |
 | `ses_rule_set_name` | no | `dork-mail` | SES receipt rule set name |
@@ -313,6 +316,32 @@ curl -X POST https://mail.yourdomain.com/api/auth/users \
 ```
 
 Passwords must be at least 12 characters and include an uppercase letter, a digit, and a special character.
+
+To create aliases along with the user, add `"aliases": ["promo-company", "newsletters"]` to the body (up to 25; bare names or full addresses on your domain).
+
+### Aliases
+
+An alias is an extra address on your domain that delivers to one user's inbox. It has no password and can't sign in. Any user can manage their own from **Aliases** in the sidebar; admins can manage anyone's from **Admin → Users**. Mail sent to an alias:
+
+- lands in the owner's inbox with a **via** chip naming the alias, and searching the alias name finds it;
+- also works with plus addressing (`promo-company+tag@domain`);
+- is dropped while the alias is disabled, and stops arriving for good once it's deleted, which frees the name.
+
+Replying to aliased mail sends from that alias, so your main address stays private, and Compose has a From picker for starting new mail from one. Addresses are unique across users and aliases. Mail received before an alias existed has no via chip.
+
+```sh
+# Create an alias; omit localPart to generate a name. Admins may add "owner".
+curl -X POST https://mail.yourdomain.com/api/aliases \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"localPart":"promo-company","label":"Acme newsletter"}'
+
+# List (admins: ?owner=<email> or ?all=1), disable, delete
+curl https://mail.yourdomain.com/api/aliases -H "Authorization: Bearer <token>"
+curl -X PATCH https://mail.yourdomain.com/api/aliases/promo-company@yourdomain.com \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"enabled":false}'
+curl -X DELETE https://mail.yourdomain.com/api/aliases/promo-company@yourdomain.com -H "Authorization: Bearer <token>"
+```
 
 ### Account settings
 

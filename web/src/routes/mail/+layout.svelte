@@ -83,6 +83,9 @@
     </nav>
 
     <div class="footer">
+      <a href="/mail/aliases" class="folder" class:active={page.url.pathname === "/mail/aliases"}>
+        <Icon name="at-sign" size={19} /><span class="label">Aliases</span>
+      </a>
       {#if auth.isAdmin}
         <a href="/mail/admin/users" class="folder" class:active={page.url.pathname.startsWith("/mail/admin")}>
           <Icon name="users" size={19} /><span class="label">Users</span>

@@ -5,6 +5,7 @@
   import type { EmailAddress, OutgoingAttachment, StoredEmail } from "@dork-mail/shared";
   import * as api from "#lib/api/client.ts";
   import { auth } from "#lib/stores/auth.svelte.ts";
+  import { aliases } from "#lib/stores/aliases.svelte.ts";
   import { mail } from "#lib/stores/mail.svelte.ts";
   import { toasts } from "#lib/stores/toast.svelte.ts";
   import { fullDate, formatAddress, fileSize, htmlToText } from "#lib/util/format.ts";
@@ -21,6 +22,7 @@
   }
 
   interface Draft {
+    from?: string;
     to: EmailAddress[];
     cc: EmailAddress[];
     bcc: EmailAddress[];
@@ -38,6 +40,7 @@
   const draftKey = `dm:draft:${mode}:${sourceId ?? ""}`;
   const composeUrl = page.url.pathname + page.url.search;
 
+  let from = $state(auth.email ?? "");
   let to = $state<EmailAddress[]>([]);
   let cc = $state<EmailAddress[]>([]);
   let bcc = $state<EmailAddress[]>([]);
@@ -59,6 +62,8 @@
   let uploading = $derived(items.some(i => !i.s3Key && !i.error));
   let total = $derived(items.reduce((n, i) => n + i.size, 0));
   let title = $derived({ new: "New message", reply: "Reply", replyAll: "Reply all", forward: "Forward" }[mode]);
+  let fromOptions = $derived([auth.email ?? "", ...aliases.enabled.map(a => a.address)]);
+  let showFrom = $derived(fromOptions.length > 1);
   let hasContent = $derived(!!(to.length || cc.length || bcc.length || subject.trim() || body.trim() || items.length));
 
   function prefixed(prefix: string, s: string) {
@@ -69,9 +74,17 @@
     return e.bodyText ?? (e.bodyHtml ? htmlToText(e.bodyHtml) : "");
   }
 
+  /** The address to answer or forward from: the alias the message came through, if it's still usable. */
+  function sendAsFor(e: StoredEmail): string | undefined {
+    const usable = new Set(aliases.enabled.map(a => a.address));
+    if (aliases.isMine(e.from.address)) return usable.has(e.from.address) ? e.from.address : undefined;
+    if (e.deliveredVia) return usable.has(e.deliveredVia) ? e.deliveredVia : undefined;
+    return [...e.to, ...(e.cc ?? [])].find(a => usable.has(a.address))?.address;
+  }
+
   function build(e: StoredEmail) {
-    const me = auth.email;
-    const fromMe = e.from.address === me;
+    const fromMe = aliases.isMine(e.from.address);
+    from = sendAsFor(e) ?? auth.email ?? "";
     if (mode === "forward") {
       subject = prefixed("Fwd", e.subject);
       body = [
@@ -94,8 +107,9 @@
     const replyTarget = fromMe ? e.to : (e.replyTo?.length ? e.replyTo : [e.from]);
     to = replyTarget;
     if (mode === "replyAll") {
-      const seen = new Set([me, ...to.map(a => a.address)]);
-      const others = [...(fromMe ? [] : e.to), ...(e.cc ?? [])].filter(a => !seen.has(a.address) && seen.add(a.address));
+      const seen = new Set(to.map(a => a.address));
+      const others = [...(fromMe ? [] : e.to), ...(e.cc ?? [])]
+        .filter(a => !aliases.isMine(a.address) && !seen.has(a.address) && seen.add(a.address));
       cc = others;
     }
     subject = prefixed("Re", e.subject);
@@ -104,11 +118,15 @@
   }
 
   onMount(async () => {
+    // Needed before building a reply, to pick the From address and leave our own addresses out of Cc.
+    try { await aliases.load(); } catch { /* compose still works from the main address */ }
+
     let draft: Draft | null = null;
     try { draft = JSON.parse(localStorage.getItem(draftKey) ?? "null"); } catch { /* corrupt draft */ }
 
     if (draft) {
       ({ to, cc, bcc, subject, body } = draft);
+      if (draft.from && fromOptions.includes(draft.from)) from = draft.from;
       items = draft.attachments.filter(a => a.s3Key);
       nextItemId = Math.max(0, ...items.map(i => i.id)) + 1;
     } else if (mode !== "new" && sourceId) {
@@ -141,14 +159,14 @@
 
   function saveDraft() {
     try {
-      if (hasContent) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, body, attachments: items.filter(i => i.s3Key) } satisfies Draft));
+      if (hasContent) localStorage.setItem(draftKey, JSON.stringify({ from, to, cc, bcc, subject, body, attachments: items.filter(i => i.s3Key) } satisfies Draft));
       else localStorage.removeItem(draftKey);
     } catch { /* storage full */ }
   }
 
   $effect(() => {
     if (!ready) return;
-    void [to, cc, bcc, subject, body, items.map(i => i.s3Key)];
+    void [from, to, cc, bcc, subject, body, items.map(i => i.s3Key)];
     const timer = setTimeout(() => untrack(saveDraft), 400);
     return () => clearTimeout(timer);
   });
@@ -194,6 +212,7 @@
 
     saveDraft();
     mail.queueSend({
+      from: from && from !== auth.email ? from : undefined,
       to,
       cc: cc.length ? cc : undefined,
       bcc: bcc.length ? bcc : undefined,
@@ -284,6 +303,17 @@
     <div class="form">
       {#if loadError}<p class="load-error">Couldn't load the original message: {loadError}</p>{/if}
 
+      {#if showFrom}
+        <label class="from-row">
+          <span class="from-label">From</span>
+          <select bind:value={from}>
+            {#each fromOptions as address (address)}
+              <option value={address}>{address}{address === auth.email ? "" : " (alias)"}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+
       <div class="to-row">
         <div class="grow"><RecipientInput bind:this={toField} label="To" bind:value={to} /></div>
         {#if !showCcBcc}
@@ -370,6 +400,20 @@
   }
 
   .load-error { color: var(--danger); font-size: 13px; padding: 10px 0; }
+
+  .from-row { display: flex; align-items: center; gap: 8px; min-height: 46px; border-bottom: 1px solid var(--border); }
+  .from-label { color: var(--text-muted); font-size: 14px; }
+  .from-row select {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .from-row select:focus-visible { outline: 2px solid var(--border-focus); border-radius: var(--radius-sm); }
 
   .to-row { display: flex; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--border); }
   .to-row :global(.field) { border-bottom: none; }
