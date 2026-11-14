@@ -141,6 +141,9 @@ resource "aws_iam_role_policy" "api_inline" {
           "dynamodb:DeleteItem",
           "dynamodb:Query",
           "dynamodb:Scan",
+          # Alias writes use TransactWriteItems, which is authorized per item
+          # (PutItem, UpdateItem, DeleteItem) plus ConditionCheckItem.
+          "dynamodb:ConditionCheckItem",
         ]
         Resource = [
           aws_dynamodb_table.main.arn,

@@ -38,6 +38,8 @@ export interface StoredEmail {
 
   /** For sent mail — SES message ID */
   sesMessageId?: string;
+  /** For received mail — the alias address it was delivered through, if any */
+  deliveredVia?: string;
 }
 
 export interface EmailAddress {
@@ -88,6 +90,41 @@ export interface UserPublic {
   displayName: string;
   createdAt: string;
   isAdmin: boolean;
+}
+
+/**
+ * An extra address on the domain that delivers to one user's mailbox. Stored
+ * twice in one transaction: a lookup item (pk "alias#<address>", sk "alias")
+ * for ingest, and an index item (pk "user#<owner>", sk "alias#<address>") for
+ * listing an owner's aliases.
+ */
+export interface Alias {
+  pk: string;
+  sk: string;
+
+  address: string;
+  /** Email of the user the alias delivers to */
+  owner: string;
+  /** Free-text note, e.g. where the address was given out */
+  label?: string;
+  /** Disabled aliases drop incoming mail and can't be sent from */
+  enabled: boolean;
+  createdAt: string;
+}
+
+export type AliasPublic = Omit<Alias, "pk" | "sk">;
+
+export interface CreateAliasRequest {
+  /** Part before the @. Generated when omitted or blank. */
+  localPart?: string;
+  label?: string;
+  /** Admin only: the user to deliver to. Defaults to the caller. */
+  owner?: string;
+}
+
+export interface UpdateAliasRequest {
+  label?: string;
+  enabled?: boolean;
 }
 
 export interface Mailbox {
@@ -156,6 +193,8 @@ export interface OutgoingAttachment {
 }
 
 export interface SendEmailRequest {
+  /** Address to send as: the caller's own address (the default) or one of their enabled aliases */
+  from?: string;
   to: EmailAddress[];
   cc?: EmailAddress[];
   bcc?: EmailAddress[];

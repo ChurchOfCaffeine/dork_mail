@@ -39,6 +39,7 @@ import type {
 } from "@dork-mail/shared";
 import isEmail from "validator/lib/isEmail";
 import { json, parseBody, caller, withErrors } from "../lib/http";
+import { getAlias } from "../lib/aliases";
 import {
   FOLDER_INDEX,
   SUMMARY_FIELDS,
@@ -204,16 +205,22 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     return json(400, { ok: false, error: "Invalid email address in to, cc, or bcc" });
   }
 
-  const [userRecord, original, forwarded] = await Promise.all([
+  const sendAs = body.from?.toLowerCase().trim() || userEmail;
+  const [userRecord, alias, original, forwarded] = await Promise.all([
     ddb.send(new GetCommand({ TableName: TABLE, Key: { pk: `user#${userEmail}`, sk: "profile" } })),
+    sendAs !== userEmail ? getAlias(ddb, TABLE, sendAs) : undefined,
     body.inReplyTo ? findEmail(ddb, TABLE, userEmail, body.inReplyTo) : undefined,
     body.forwardOf ? findEmail(ddb, TABLE, userEmail, body.forwardOf) : undefined,
   ]);
   if (body.inReplyTo && !original) return json(400, { ok: false, error: "Replied-to message not found" });
   if (body.forwardOf && !forwarded) return json(400, { ok: false, error: "Forwarded message not found" });
+  if (sendAs !== userEmail && (!alias || alias.owner !== userEmail)) {
+    return json(403, { ok: false, error: "You can only send from your own address or your aliases" });
+  }
+  if (alias && !alias.enabled) return json(400, { ok: false, error: `${sendAs} is disabled` });
 
   const displayName = (userRecord.Item as User | undefined)?.displayName;
-  const fromAddress = formatAddress({ name: displayName, address: userEmail });
+  const fromAddress = formatAddress({ name: displayName, address: sendAs });
 
   const headers: MessageHeader[] = [];
   let references: string[] | undefined;
@@ -279,7 +286,7 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
     return { filename: f.filename, contentType: f.contentType, size: f.content.byteLength, s3Key };
   }));
 
-  const from = { address: userEmail, name: displayName };
+  const from = { address: sendAs, name: displayName };
   const snippet = makeSnippet(body.bodyText, body.bodyHtml);
   const stored: StoredEmail = {
     pk: mailboxPk(userEmail),
@@ -310,7 +317,7 @@ async function sendEmail(event: APIGatewayProxyEvent, userEmail: string): Promis
 
   metrics.addMetric("EmailsSent", MetricUnit.Count, 1);
   metrics.publishStoredMetrics();
-  logger.info("Email sent", { from: userEmail, recipients: allRecipients.length, attachments: files.length });
+  logger.info("Email sent", { from: userEmail, sendAs, recipients: allRecipients.length, attachments: files.length });
 
   return json(200, { ok: true, data: { messageId } });
 }

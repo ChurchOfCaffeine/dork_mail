@@ -122,6 +122,10 @@ locals {
     "POST /api/auth/users"                           = aws_apigatewayv2_integration.auth.id
     "PATCH /api/auth/users/{email}"                  = aws_apigatewayv2_integration.auth.id
     "DELETE /api/auth/users/{email}"                 = aws_apigatewayv2_integration.auth.id
+    "GET /api/aliases"                               = aws_apigatewayv2_integration.auth.id
+    "POST /api/aliases"                              = aws_apigatewayv2_integration.auth.id
+    "PATCH /api/aliases/{address}"                   = aws_apigatewayv2_integration.auth.id
+    "DELETE /api/aliases/{address}"                  = aws_apigatewayv2_integration.auth.id
     "GET /api/push/key"                              = aws_apigatewayv2_integration.auth.id
     "POST /api/push/subscribe"                       = aws_apigatewayv2_integration.auth.id
     "POST /api/push/unsubscribe"                     = aws_apigatewayv2_integration.auth.id

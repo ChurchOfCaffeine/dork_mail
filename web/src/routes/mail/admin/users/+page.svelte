@@ -9,6 +9,7 @@
   if (!auth.isAdmin) goto("/mail");
 
   let users = $state<UserPublic[]>([]);
+  let aliasCounts = $state<Record<string, number>>({});
   let loading = $state(true);
   let loadError = $state("");
 
@@ -16,6 +17,7 @@
   let newDisplayName = $state("");
   let newPassword = $state("");
   let newIsAdmin = $state(false);
+  let newAliases = $state("");
   let creating = $state(false);
   let createError = $state("");
   let createMsg = $state("");
@@ -28,7 +30,13 @@
 
   async function load() {
     loading = true; loadError = "";
-    try { users = await api.listUsers(); }
+    try {
+      const [userList, aliasList] = await Promise.all([api.listUsers(), api.listAliases({ all: true })]);
+      users = userList;
+      const counts: Record<string, number> = {};
+      for (const a of aliasList) counts[a.owner] = (counts[a.owner] ?? 0) + 1;
+      aliasCounts = counts;
+    }
     catch (e) { loadError = (e as Error).message; }
     finally { loading = false; }
   }
@@ -39,9 +47,12 @@
     }
     createError = ""; createMsg = ""; creating = true;
     try {
-      await api.createUser(newEmail, newPassword, newDisplayName, newIsAdmin);
-      createMsg = `User ${newEmail} created.`;
-      newEmail = ""; newDisplayName = ""; newPassword = ""; newIsAdmin = false;
+      const aliasNames = newAliases.split(/[\s,]+/).map(a => a.trim()).filter(Boolean);
+      const created = await api.createUser(newEmail, newPassword, newDisplayName, newIsAdmin, aliasNames);
+      createMsg = created.aliases.length
+        ? `User ${created.email} created with ${created.aliases.length} alias${created.aliases.length === 1 ? "" : "es"}.`
+        : `User ${created.email} created.`;
+      newEmail = ""; newDisplayName = ""; newPassword = ""; newIsAdmin = false; newAliases = "";
       await load();
     } catch (e) {
       createError = (e as Error).message;
@@ -104,6 +115,11 @@
                 {#if user.isAdmin}
                   <span class="badge badge-admin">admin</span>
                 {/if}
+                <a
+                  class="badge badge-aliases"
+                  href={user.email === auth.email ? "/mail/aliases" : `/mail/aliases?owner=${encodeURIComponent(user.email)}`}
+                  title="Manage aliases"
+                >{aliasCounts[user.email] ?? 0} alias{(aliasCounts[user.email] ?? 0) === 1 ? "" : "es"}</a>
               </div>
               {#if user.email !== auth.email}
                 <div class="user-actions">
@@ -148,6 +164,11 @@
       <div class="field">
         <label for="newPassword">Password</label>
         <input id="newPassword" type="password" bind:value={newPassword} autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label for="newAliases">Aliases <span class="optional">(optional)</span></label>
+        <input id="newAliases" type="text" bind:value={newAliases} placeholder="promo-company, newsletters" autocapitalize="off" spellcheck="false" />
+        <span class="hint">Names separated by commas. Each delivers to this user's inbox.</span>
       </div>
     </div>
     <label class="checkbox-label">
@@ -248,6 +269,8 @@
   }
   .badge-admin { background: var(--accent-dim); color: var(--accent); }
   .badge-self  { background: var(--bg-hover); color: var(--text-muted); }
+  .badge-aliases { background: var(--bg-hover); color: var(--text-secondary); text-decoration: none; }
+  .badge-aliases:hover { color: var(--accent); }
 
   .user-actions {
     display: flex;
@@ -273,9 +296,11 @@
     margin-bottom: 12px;
   }
 
-  .form-grid .field:last-child {
+  .form-grid .field:nth-child(n + 3) {
     grid-column: span 2;
   }
+  .optional { text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--text-muted); }
+  .hint { font-size: 12px; color: var(--text-muted); }
 
   .field {
     display: flex;

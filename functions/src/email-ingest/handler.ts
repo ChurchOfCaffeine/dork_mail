@@ -12,10 +12,11 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { simpleParser, type AddressObject } from "mailparser";
-import type { StoredEmail, EmailAddress, Attachment, MailFolder } from "@dork-mail/shared";
+import type { StoredEmail, EmailAddress, Attachment, MailFolder, Alias } from "@dork-mail/shared";
 import isEmail from "validator/lib/isEmail";
 import { mailboxPk, mailboxFolderKey, makeSnippet, makeSearchText, storeBodies } from "../lib/mail-store";
 import { notifyNewMail } from "../lib/push";
+import { aliasKey } from "../lib/aliases";
 
 const logger = new Logger({ serviceName: "email-ingest" });
 const tracer = new Tracer({ serviceName: "email-ingest" });
@@ -71,8 +72,8 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
     .some(v => String(v ?? "").toUpperCase() === "FAIL");
   const folder: MailFolder = spam ? "spam" : "inbox";
 
-  const mailboxes = await localMailboxes(envelope?.recipients ?? [...toAddresses, ...ccAddresses].map(a => a.address));
-  if (!mailboxes.length) {
+  const deliveries = await localMailboxes(envelope?.recipients ?? [...toAddresses, ...ccAddresses].map(a => a.address));
+  if (!deliveries.length) {
     logger.warn("No local mailbox for recipients", { key, recipients: envelope?.recipients });
     return;
   }
@@ -87,7 +88,7 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
   const from = toEmailAddresses(parsed.from)[0] ?? { address: "unknown" };
   const subject = parsed.subject ?? "(no subject)";
 
-  for (const mailbox of mailboxes) {
+  for (const { mailbox, via } of deliveries) {
     const email: StoredEmail = {
       pk: mailboxPk(mailbox),
       sk: `ts#${ts}#${messageId}`,
@@ -99,7 +100,7 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
       replyTo: toEmailAddresses(parsed.replyTo),
       subject,
       snippet,
-      searchText: makeSearchText({ from, to: toAddresses, cc: ccAddresses, subject, snippet }),
+      searchText: makeSearchText({ from, to: toAddresses, cc: ccAddresses, subject, snippet, deliveredVia: via }),
       ...bodies,
       inReplyTo: parsed.inReplyTo ? stripBrackets(parsed.inReplyTo) : undefined,
       references: refs,
@@ -110,6 +111,7 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
       starred: false,
       labels: [],
       folder,
+      deliveredVia: via,
     };
 
     try {
@@ -121,7 +123,7 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
       }
       throw err;
     }
-    logger.info("Stored email", { mailbox, messageId, folder });
+    logger.info("Stored email", { mailbox, messageId, folder, via });
     if (folder === "inbox") await notifyNewMail(ddb, TABLE, logger, mailbox, email);
   }
 
@@ -130,27 +132,44 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
 }
 
 /**
- * Maps recipient addresses to existing users on this domain. Plus-addressed
- * mail (user+tag@domain) is delivered to the base mailbox.
+ * Maps recipient addresses to the mailboxes they deliver to on this domain.
+ * Plus-addressed mail (name+tag@domain) goes to the base address, which is
+ * either a user or an enabled alias that delivers to its owner. Each mailbox
+ * gets one copy; mail addressed to a user directly isn't marked as via an alias.
  */
-async function localMailboxes(recipients: string[]): Promise<string[]> {
+async function localMailboxes(recipients: string[]): Promise<{ mailbox: string; via?: string }[]> {
   const candidates = [...new Set(
     recipients
       .map(r => r.toLowerCase().trim())
       .filter(r => r.endsWith(`@${DOMAIN}`))
       .map(r => r.replace(/\+[^@]*@/, "@")),
-  )];
+  )].slice(0, 50); // two keys each, and BatchGet takes at most 100
   if (!candidates.length) return [];
 
   const res = await ddb.send(new BatchGetCommand({
     RequestItems: {
       [TABLE]: {
-        Keys: candidates.slice(0, 100).map(email => ({ pk: `user#${email}`, sk: "profile" })),
-        ProjectionExpression: "email",
+        Keys: candidates.flatMap(address => [{ pk: `user#${address}`, sk: "profile" }, aliasKey(address)]),
+        ProjectionExpression: "pk, email, address, #owner, enabled",
+        ExpressionAttributeNames: { "#owner": "owner" },
       },
     },
   }));
-  return (res.Responses?.[TABLE] ?? []).map(u => u.email as string);
+  const items = res.Responses?.[TABLE] ?? [];
+
+  const deliveries = new Map<string, string | undefined>();
+  for (const item of items) {
+    if (String(item.pk).startsWith("user#")) deliveries.set(item.email as string, undefined);
+  }
+  for (const item of items as Partial<Alias>[]) {
+    if (!String(item.pk).startsWith("alias#")) continue;
+    if (!item.enabled) {
+      logger.info("Dropping mail for disabled alias", { alias: item.address });
+      continue;
+    }
+    if (!deliveries.has(item.owner!)) deliveries.set(item.owner!, item.address);
+  }
+  return [...deliveries].map(([mailbox, via]) => ({ mailbox, via }));
 }
 
 async function storeAttachments(

@@ -13,6 +13,9 @@ import type {
   UnreadCounts,
   UploadResponse,
   PushSubscriptionRequest,
+  AliasPublic,
+  CreateAliasRequest,
+  UpdateAliasRequest,
 } from "@dork-mail/shared";
 import { auth } from "#lib/stores/auth.svelte.ts";
 
@@ -88,9 +91,9 @@ export async function login(email: string, password: string) {
   );
 }
 
-export async function createUser(email: string, password: string, displayName: string, isAdmin = false) {
-  return request<{ email: string; displayName: string }>(
-    "POST", "/auth/users", { email, password, displayName, isAdmin }
+export async function createUser(email: string, password: string, displayName: string, isAdmin = false, aliases?: string[]) {
+  return request<{ email: string; displayName: string; aliases: string[] }>(
+    "POST", "/auth/users", { email, password, displayName, isAdmin, aliases: aliases?.length ? aliases : undefined }
   );
 }
 
@@ -107,6 +110,28 @@ export async function updateUser(
 
 export async function deleteUser(email: string) {
   return request<void>("DELETE", `/auth/users/${encodeURIComponent(email)}`);
+}
+
+// ─── Aliases ──────────────────────────────────────────────────────────────────
+
+/** The caller's aliases, or an admin's view of one owner's (`owner`) or everyone's (`all`). */
+export async function listAliases(opts: { owner?: string; all?: boolean } = {}) {
+  const qs = new URLSearchParams();
+  if (opts.owner) qs.set("owner", opts.owner);
+  if (opts.all) qs.set("all", "1");
+  return request<AliasPublic[]>("GET", `/aliases${qs.size ? `?${qs}` : ""}`);
+}
+
+export async function createAlias(req: CreateAliasRequest) {
+  return request<AliasPublic>("POST", "/aliases", req);
+}
+
+export async function updateAlias(address: string, patch: UpdateAliasRequest) {
+  return request<AliasPublic>("PATCH", `/aliases/${encodeURIComponent(address)}`, patch);
+}
+
+export async function deleteAlias(address: string) {
+  return request<void>("DELETE", `/aliases/${encodeURIComponent(address)}`);
 }
 
 // ─── Mail ─────────────────────────────────────────────────────────────────────

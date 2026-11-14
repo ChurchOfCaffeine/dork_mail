@@ -44,6 +44,17 @@ variable "admin_display_name" {
   default     = "Admin"
 }
 
+variable "max_aliases_per_user" {
+  description = "Most aliases a user can own. 0 means no limit."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.max_aliases_per_user >= 0 && floor(var.max_aliases_per_user) == var.max_aliases_per_user
+    error_message = "max_aliases_per_user must be a whole number, 0 or more."
+  }
+}
+
 variable "vapid_public_key" {
   description = "Web Push VAPID public key. Generate with: pnpm gen-vapid-keys. Push notifications stay off while either key is empty."
   type        = string
