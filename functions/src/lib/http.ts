@@ -4,10 +4,10 @@ import type { ApiResponse } from "@dork-mail/shared";
 
 const CORS_ORIGIN = process.env.WEB_ORIGIN ?? "";
 
-export function json(status: number, body: ApiResponse): APIGatewayProxyResult {
+export function json(status: number, body: ApiResponse, headers: Record<string, string> = {}): APIGatewayProxyResult {
   return {
     statusCode: status,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN },
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": CORS_ORIGIN, ...headers },
     body: JSON.stringify(body),
   };
 }

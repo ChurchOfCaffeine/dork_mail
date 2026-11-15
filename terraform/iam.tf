@@ -47,6 +47,7 @@ resource "aws_iam_role_policy" "email_ingest_inline" {
         Sid    = "EmailTable"
         Effect = "Allow"
         Action = [
+          "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:BatchGetItem",
           "dynamodb:Query",
@@ -58,16 +59,10 @@ resource "aws_iam_role_policy" "email_ingest_inline" {
         ]
       },
       {
-        Sid      = "ReadVapidKeys"
+        Sid      = "FailedEventQueue"
         Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = local.vapid_param_arn
-      },
-      {
-        Sid      = "Xray"
-        Effect   = "Allow"
-        Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
-        Resource = "*"
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.email_ingest_failed.arn
       }
     ]
   })
@@ -102,32 +97,28 @@ resource "aws_iam_role_policy" "authorizer_inline" {
         Effect   = "Allow"
         Action   = ["dynamodb:GetItem"]
         Resource = aws_dynamodb_table.main.arn
-      },
-      {
-        Sid      = "Xray"
-        Effect   = "Allow"
-        Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
-        Resource = "*"
       }
     ]
   })
 }
 
-# ─── API Lambda role (shared by auth, mail, dns handlers) ────────────────────
+# ─── API Lambda roles, one per handler ───────────────────────────────────────
 
 resource "aws_iam_role" "api" {
-  name               = "${local.name_prefix}-api"
+  for_each           = toset(["auth", "jmap", "dns"])
+  name               = "${local.name_prefix}-api-${each.key}"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
 resource "aws_iam_role_policy_attachment" "api_basic" {
-  role       = aws_iam_role.api.name
+  for_each   = aws_iam_role.api
+  role       = each.value.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role_policy" "api_inline" {
-  name = "api-perms"
-  role = aws_iam_role.api.id
+resource "aws_iam_role_policy" "api_auth" {
+  name = "api-auth-perms"
+  role = aws_iam_role.api["auth"].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -139,8 +130,57 @@ resource "aws_iam_role_policy" "api_inline" {
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
           "dynamodb:DeleteItem",
+          "dynamodb:BatchWriteItem",
           "dynamodb:Query",
-          "dynamodb:Scan",
+        ]
+        Resource = [
+          aws_dynamodb_table.main.arn,
+          "${aws_dynamodb_table.main.arn}/index/*",
+        ]
+      },
+      {
+        Sid      = "S3ListAccountObjects"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.emails.arn
+      },
+      {
+        Sid    = "S3DeleteAccountObjects"
+        Effect = "Allow"
+        Action = ["s3:DeleteObject"]
+        Resource = [
+          "${aws_s3_bucket.emails.arn}/raw/*",
+          "${aws_s3_bucket.emails.arn}/bodies/*",
+          "${aws_s3_bucket.emails.arn}/attachments/*",
+          "${aws_s3_bucket.emails.arn}/uploads/*",
+        ]
+      },
+      {
+        Sid      = "SSM"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = aws_ssm_parameter.jwt_secret.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "api_jmap" {
+  name = "api-jmap-perms"
+  role = aws_iam_role.api["jmap"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DynamoDB"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
         ]
         Resource = [
           aws_dynamodb_table.main.arn,
@@ -158,17 +198,36 @@ resource "aws_iam_role_policy" "api_inline" {
         Effect = "Allow"
         Action = ["s3:PutObject"]
         Resource = [
-          "${aws_s3_bucket.emails.arn}/uploads/*",
           "${aws_s3_bucket.emails.arn}/attachments/*",
           "${aws_s3_bucket.emails.arn}/bodies/*",
+          "${aws_s3_bucket.emails.arn}/raw/*",
         ]
       },
       {
-        Sid      = "SES"
+        Sid      = "S3BodyDelete"
         Effect   = "Allow"
-        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource = "*"
+        Action   = ["s3:DeleteObject"]
+        Resource = "${aws_s3_bucket.emails.arn}/bodies/*"
       },
+      {
+        Sid    = "SES"
+        Effect = "Allow"
+        Action = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = [
+          "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
+          aws_ses_configuration_set.main.arn,
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "api_dns" {
+  name = "api-dns-perms"
+  role = aws_iam_role.api["dns"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Sid    = "SESRead"
         Effect = "Allow"
@@ -194,18 +253,6 @@ resource "aws_iam_role_policy" "api_inline" {
           "route53:ChangeResourceRecordSets",
         ]
         Resource = "arn:aws:route53:::hostedzone/${local.hosted_zone_id}"
-      },
-      {
-        Sid      = "SSM"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = [aws_ssm_parameter.jwt_secret.arn, local.vapid_param_arn]
-      },
-      {
-        Sid      = "Xray"
-        Effect   = "Allow"
-        Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
-        Resource = "*"
       }
     ]
   })

@@ -2,7 +2,7 @@
 // then zips each bundle into functions/dist-zip/<name>.zip.
 //
 // Zip names must match the keys expected in terraform/lambda.tf:
-//   email-ingest.zip, authorizer.zip, api-auth.zip, api-mail.zip, api-dns.zip
+//   email-ingest.zip, authorizer.zip, api-auth.zip, api-jmap.zip, api-dns.zip
 //
 // Run via: npm run build --workspace=functions
 // Or via:  scripts/publish-lambdas.sh <bucket> [prefix]
@@ -20,7 +20,7 @@ const handlers = [
   { entry: "src/email-ingest/handler.ts", outdir: "bundle/email-ingest", zip: "email-ingest.zip", handler: "handler" },
   { entry: "src/authorizer/handler.ts",   outdir: "bundle/authorizer",   zip: "authorizer.zip",   handler: "handler" },
   { entry: "src/api/auth.ts",             outdir: "bundle/api-auth",     zip: "api-auth.zip",     handler: "auth"    },
-  { entry: "src/api/mail.ts",             outdir: "bundle/api-mail",     zip: "api-mail.zip",     handler: "mail"    },
+  { entry: "src/api/jmap.ts",             outdir: "bundle/api-jmap",     zip: "api-jmap.zip",     handler: "jmap"    },
   { entry: "src/api/dns.ts",              outdir: "bundle/api-dns",      zip: "api-dns.zip",      handler: "dns"     },
 ];
 

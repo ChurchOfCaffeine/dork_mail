@@ -1,9 +1,13 @@
 # Single table design — all entities share this table.
 # Access patterns:
 #   - List emails by mailbox+folder:  folder-index  mailboxFolder=mailbox#<email>#<folder>, SK desc
+#   - List emails in a thread:        thread-index  mailboxThread=mailbox#<email>#<threadId>, SK asc
 #   - Find email by Message-ID:       message-index PK=mailbox#<email>  messageId=<id>
+#   - Mailbox JMAP state and changes: PK=mailbox#<email>  SK=state, SK begins_with chg#
 #   - Get user profile:               PK=user#<email>     SK=profile
-#   - List push subscriptions:        PK=user#<email>     SK begins_with push#
+#   - List users:                     user-index          entity=user, set only on profiles
+#   - List refresh tokens:            PK=user#<email>     SK begins_with refresh#
+#   - Redeem an authorization code:   PK=authcode#<hash>  SK=code
 
 resource "aws_dynamodb_table" "main" {
   name         = "${local.name_prefix}-data"
@@ -27,24 +31,67 @@ resource "aws_dynamodb_table" "main" {
     name = "messageId"
     type = "S"
   }
+  attribute {
+    name = "mailboxThread"
+    type = "S"
+  }
+  attribute {
+    name = "entity"
+    type = "S"
+  }
 
-  # Projects only what the message list renders, so list pages stay small.
-  # Must cover SUMMARY_FIELDS in functions/src/lib/mail-store.ts, plus searchText for search.
+  # Projects only what Email/query filters on, so scans stay small.
+  # Must cover SUMMARY_FIELDS in functions/src/lib/mail-store.ts.
   global_secondary_index {
-    name            = "folder-index"
-    hash_key        = "mailboxFolder"
-    range_key       = "sk"
+    name = "folder-index"
+    key_schema {
+      attribute_name = "mailboxFolder"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "sk"
+      key_type       = "RANGE"
+    }
     projection_type = "INCLUDE"
     non_key_attributes = [
-      "messageId", "from", "to", "cc", "subject", "snippet", "searchText",
+      "messageId", "threadId", "from", "to", "cc", "subject", "snippet", "searchText",
       "receivedAt", "read", "starred", "labels", "folder", "attachments",
     ]
   }
 
   global_secondary_index {
-    name            = "message-index"
-    hash_key        = "pk"
-    range_key       = "messageId"
+    name = "thread-index"
+    key_schema {
+      attribute_name = "mailboxThread"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "sk"
+      key_type       = "RANGE"
+    }
+    projection_type = "KEYS_ONLY"
+  }
+
+  global_secondary_index {
+    name = "user-index"
+    key_schema {
+      attribute_name = "entity"
+      key_type       = "HASH"
+    }
+    projection_type    = "INCLUDE"
+    non_key_attributes = ["email", "displayName", "createdAt", "isAdmin"]
+  }
+
+  global_secondary_index {
+    name = "message-index"
+    key_schema {
+      attribute_name = "pk"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "messageId"
+      key_type       = "RANGE"
+    }
     projection_type = "KEYS_ONLY"
   }
 
@@ -79,6 +126,7 @@ resource "aws_dynamodb_table_item" "admin_user" {
     displayName  = { S = var.admin_display_name }
     createdAt    = { S = timestamp() }
     isAdmin      = { BOOL = true }
+    entity       = { S = "user" }
   })
 
   lifecycle {

@@ -28,7 +28,7 @@ resource "aws_route53_record" "ses_verification" {
 }
 
 resource "aws_ses_domain_identity_verification" "mail" {
-  domain = aws_ses_domain_identity.mail.domain
+  domain     = aws_ses_domain_identity.mail.domain
   depends_on = [aws_route53_record.ses_verification]
 }
 
@@ -56,7 +56,7 @@ resource "aws_route53_record" "dmarc" {
   name    = "_dmarc.${var.domain}"
   type    = "TXT"
   ttl     = 300
-  records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc@${var.domain}"]
+  records = ["v=DMARC1; p=quarantine${var.dmarc_report_email == "" ? "" : "; rua=mailto:${var.dmarc_report_email}"}"]
 }
 
 # ─── Custom MAIL FROM domain ──────────────────────────────────────────────────

@@ -1,12 +1,16 @@
-import { DynamoDBDocumentClient, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { createHash } from "node:crypto";
+import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { StoredEmail, EmailSummary, MailFolder } from "@dork-mail/shared";
 
 export const FOLDER_INDEX = "folder-index";
 export const MESSAGE_INDEX = "message-index";
+export const THREAD_INDEX = "thread-index";
 
+// Must match non_key_attributes of folder-index in terraform/dynamo.tf.
 export const SUMMARY_FIELDS: (keyof EmailSummary)[] = [
-  "messageId", "from", "to", "cc", "subject", "snippet", "receivedAt", "read", "starred", "labels", "folder", "attachments",
+  "sk", "messageId", "threadId", "from", "to", "cc", "subject", "snippet", "searchText",
+  "receivedAt", "read", "starred", "labels", "folder", "attachments",
 ];
 
 // DynamoDB items cap at 400KB including every other attribute.
@@ -14,6 +18,17 @@ const MAX_INLINE_BODY_BYTES = 300_000;
 
 export const mailboxPk = (email: string) => `mailbox#${email}`;
 export const mailboxFolderKey = (email: string, folder: MailFolder) => `mailbox#${email}#${folder}`;
+export const mailboxThreadKey = (email: string, threadId: string) => `mailbox#${email}#${threadId}`;
+export const emailSk = (receivedAt: string, messageId: string) => `ts#${receivedAt.replace(/[:.]/g, "-")}#${messageId}`;
+
+/**
+ * Threads by the first References entry, which RFC 5322 says replies keep, so
+ * every message in a conversation hashes the same root without a lookup.
+ */
+export function threadIdFor(e: Pick<StoredEmail, "messageId" | "inReplyTo" | "references">): string {
+  const root = e.references?.[0] ?? e.inReplyTo ?? e.messageId;
+  return "T" + createHash("sha256").update(root).digest("base64url").slice(0, 22);
+}
 
 export function makeSnippet(text?: string, html?: string): string | undefined {
   const source = text || (html ? htmlToText(html) : "");
@@ -65,30 +80,12 @@ export async function loadBodies(s3: S3Client, bucket: string, item: StoredEmail
   item.bodyHtml = bodies.bodyHtml;
 }
 
-export async function findEmail(
-  ddb: DynamoDBDocumentClient,
-  table: string,
-  userEmail: string,
-  messageId: string,
-): Promise<StoredEmail | undefined> {
-  const keys = await ddb.send(new QueryCommand({
-    TableName: table,
-    IndexName: MESSAGE_INDEX,
-    KeyConditionExpression: "pk = :pk AND messageId = :mid",
-    ExpressionAttributeValues: { ":pk": mailboxPk(userEmail), ":mid": messageId },
-    Limit: 1,
-  }));
-  const key = keys.Items?.[0];
-  if (!key) return undefined;
-  const res = await ddb.send(new GetCommand({ TableName: table, Key: { pk: key.pk, sk: key.sk } }));
-  return res.Item as StoredEmail | undefined;
-}
-
-export async function countUnread(
+export async function countFolder(
   ddb: DynamoDBDocumentClient,
   table: string,
   userEmail: string,
   folder: MailFolder,
+  unreadOnly: boolean,
 ): Promise<number> {
   let count = 0;
   let startKey: Record<string, unknown> | undefined;
@@ -97,9 +94,11 @@ export async function countUnread(
       TableName: table,
       IndexName: FOLDER_INDEX,
       KeyConditionExpression: "mailboxFolder = :mf",
-      FilterExpression: "#read = :false",
-      ExpressionAttributeNames: { "#read": "read" },
-      ExpressionAttributeValues: { ":mf": mailboxFolderKey(userEmail, folder), ":false": false },
+      FilterExpression: unreadOnly ? "#read = :false" : undefined,
+      ExpressionAttributeNames: unreadOnly ? { "#read": "read" } : undefined,
+      ExpressionAttributeValues: unreadOnly
+        ? { ":mf": mailboxFolderKey(userEmail, folder), ":false": false }
+        : { ":mf": mailboxFolderKey(userEmail, folder) },
       Select: "COUNT",
       ExclusiveStartKey: startKey,
     }));

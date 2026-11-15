@@ -1,7 +1,11 @@
 # Terraform manages Lambda configuration (roles, env vars, triggers).
-# Code is deployed separately via scripts/publish-lambdas.sh, which calls
-# aws lambda update-function-code directly — Terraform never touches code after
-# the initial stub is created.
+# Code is deployed separately via scripts/deploy-functions.ts, which calls
+# update-function-code directly. Terraform never touches code after the
+# initial stub is created.
+#
+# Tracing is PassThrough rather than omitted, since removing the block keeps
+# whatever mode the function already has. Nothing upstream sends a sampled
+# trace header, so no traces are recorded.
 
 locals {
   lambda_runtime = "nodejs24.x"
@@ -13,7 +17,6 @@ locals {
     HOSTED_ZONE_ID          = local.hosted_zone_id
     SES_INBOUND_EP          = local.ses_inbound_ep
     JWT_SECRET_PARAM        = aws_ssm_parameter.jwt_secret.name
-    VAPID_PARAM             = local.push_enabled ? local.vapid_param : ""
     SES_CONFIG_SET          = aws_ses_configuration_set.main.name
     WEB_ORIGIN              = "https://${local.web_fqdn}"
     POWERTOOLS_SERVICE_NAME = "dork-mail"
@@ -43,15 +46,61 @@ resource "aws_lambda_function" "email_ingest" {
   handler          = "handler.handler"
   filename         = data.archive_file.stub.output_path
   source_code_hash = data.archive_file.stub.output_base64sha256
-  timeout          = 30
-  memory_size      = 256
+  timeout          = 120
+  # mailparser holds the raw message and every decoded part in memory, and SES accepts messages up to 40 MB.
+  memory_size = 1024
 
-  tracing_config { mode = "Active" }
+  tracing_config { mode = "PassThrough" }
   environment { variables = local.lambda_env_common }
 
   lifecycle {
     ignore_changes = [filename, source_code_hash]
   }
+}
+
+# SES invokes ingest asynchronously. Events that still fail after Lambda's
+# retries land here instead of being dropped; see "Failed deliveries" in the README.
+resource "aws_sqs_queue" "email_ingest_failed" {
+  name                      = "${local.name_prefix}-email-ingest-failed"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+}
+
+resource "aws_lambda_function_event_invoke_config" "email_ingest" {
+  function_name = aws_lambda_function.email_ingest.function_name
+
+  destination_config {
+    on_failure {
+      destination = aws_sqs_queue.email_ingest_failed.arn
+    }
+  }
+}
+
+resource "aws_sns_topic" "alerts" {
+  name = "${local.name_prefix}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  count     = var.alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "email_ingest_failed" {
+  alarm_name          = "${local.name_prefix}-email-ingest-failed"
+  alarm_description   = "Inbound mail failed to ingest and is waiting in the ${aws_sqs_queue.email_ingest_failed.name} queue. Check the email-ingest logs, fix the cause, then redrive the queued events as described in the README."
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.email_ingest_failed.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
 }
 
 # Invoked by the receipt rule in ses.tf, which carries the envelope recipients
@@ -76,7 +125,7 @@ resource "aws_lambda_function" "authorizer" {
   timeout          = 5
   memory_size      = 128
 
-  tracing_config { mode = "Active" }
+  tracing_config { mode = "PassThrough" }
   environment {
     variables = {
       JWT_SECRET_PARAM        = aws_ssm_parameter.jwt_secret.name
@@ -95,15 +144,16 @@ resource "aws_lambda_function" "authorizer" {
 
 resource "aws_lambda_function" "api_auth" {
   function_name    = "${local.name_prefix}-api-auth"
-  role             = aws_iam_role.api.arn
+  role             = aws_iam_role.api["auth"].arn
   runtime          = local.lambda_runtime
   handler          = "auth.handler"
   filename         = data.archive_file.stub.output_path
   source_code_hash = data.archive_file.stub.output_base64sha256
-  timeout          = 15
-  memory_size      = 256
+  # API Gateway gives up at 30 s; deleting a user with a lot of mail needs most of it.
+  timeout     = 29
+  memory_size = 256
 
-  tracing_config { mode = "Active" }
+  tracing_config { mode = "PassThrough" }
   environment { variables = local.lambda_env_common }
 
   lifecycle {
@@ -111,19 +161,19 @@ resource "aws_lambda_function" "api_auth" {
   }
 }
 
-# ─── API: Mail ────────────────────────────────────────────────────────────────
+# ─── API: JMAP ────────────────────────────────────────────────────────────────
 
-resource "aws_lambda_function" "api_mail" {
-  function_name    = "${local.name_prefix}-api-mail"
-  role             = aws_iam_role.api.arn
+resource "aws_lambda_function" "api_jmap" {
+  function_name    = "${local.name_prefix}-api-jmap"
+  role             = aws_iam_role.api["jmap"].arn
   runtime          = local.lambda_runtime
-  handler          = "mail.handler"
+  handler          = "jmap.handler"
   filename         = data.archive_file.stub.output_path
   source_code_hash = data.archive_file.stub.output_base64sha256
-  timeout          = 15
-  memory_size      = 256
+  timeout          = 29
+  memory_size      = 512
 
-  tracing_config { mode = "Active" }
+  tracing_config { mode = "PassThrough" }
   environment { variables = local.lambda_env_common }
 
   lifecycle {
@@ -135,7 +185,7 @@ resource "aws_lambda_function" "api_mail" {
 
 resource "aws_lambda_function" "api_dns" {
   function_name    = "${local.name_prefix}-api-dns"
-  role             = aws_iam_role.api.arn
+  role             = aws_iam_role.api["dns"].arn
   runtime          = local.lambda_runtime
   handler          = "dns.handler"
   filename         = data.archive_file.stub.output_path
@@ -143,10 +193,11 @@ resource "aws_lambda_function" "api_dns" {
   timeout          = 30
   memory_size      = 256
 
-  tracing_config { mode = "Active" }
+  tracing_config { mode = "PassThrough" }
   environment {
     variables = merge(local.lambda_env_common, {
       SES_INBOUND_ENDPOINT = local.ses_inbound_ep
+      DMARC_REPORT_EMAIL   = var.dmarc_report_email
     })
   }
 

@@ -22,10 +22,10 @@
     height: var(--header-h);
     padding: 0 12px 0 20px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
+    background: var(--bg-base);
     flex-shrink: 0;
   }
-  h1 { flex: 1; min-width: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h1 { flex: 1; min-width: 0; font-size: 1.125rem; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .actions { display: flex; align-items: center; gap: 2px; }
   .menu { display: none; margin-left: -10px; }
 
@@ -35,6 +35,6 @@
       padding: var(--safe-top) 6px 0 8px;
     }
     .menu { display: inline-flex; margin-left: 0; }
-    h1 { font-size: 20px; }
+    h1 { font-size: 1.25rem; }
   }
 </style>

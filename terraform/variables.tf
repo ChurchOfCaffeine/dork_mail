@@ -44,19 +44,17 @@ variable "admin_display_name" {
   default     = "Admin"
 }
 
-variable "vapid_public_key" {
-  description = "Web Push VAPID public key. Generate with: pnpm gen-vapid-keys. Push notifications stay off while either key is empty."
+variable "alert_email" {
+  description = "Email address subscribed to alarms, such as inbound mail that failed to ingest. Empty skips the subscription; the alarms still show in CloudWatch."
   type        = string
   default     = ""
 }
 
-variable "vapid_private_key" {
-  description = "Web Push VAPID private key, from the same pnpm gen-vapid-keys output."
+variable "dmarc_report_email" {
+  description = "Address that receives DMARC aggregate reports (rua). Empty publishes DMARC without reports. Use a mailbox that exists, or reports are dropped."
   type        = string
   default     = ""
-  sensitive   = true
 }
-
 
 variable "tags" {
   description = "Tags to apply to all resources."

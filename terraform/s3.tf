@@ -11,7 +11,10 @@ resource "aws_s3_bucket_versioning" "emails" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
+  # Every rule field AWS reports is set, since an unset one makes this set block differ on each plan.
   rule {
+    blocked_encryption_types = ["SSE-C"]
+    bucket_key_enabled       = false
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
     }
@@ -36,23 +39,24 @@ resource "aws_s3_bucket_lifecycle_configuration" "emails" {
     expiration { days = 90 }
   }
 
-  # Sending copies uploads into attachments/, so leftovers are abandoned drafts.
+  # Drafts reference uploads in place and sending copies them into attachments/,
+  # so this bounds how long an unsent draft keeps its attachments.
   rule {
     id     = "expire-uploads"
     status = "Enabled"
     filter { prefix = "uploads/" }
-    expiration { days = 1 }
+    expiration { days = 7 }
     abort_incomplete_multipart_upload { days_after_initiation = 1 }
   }
 }
 
-# Compose uploads attachments straight to S3 with presigned PUTs from the web app.
+# JMAP downloads redirect to presigned GETs, which the browser follows with CORS.
 resource "aws_s3_bucket_cors_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
   cors_rule {
-    allowed_methods = ["PUT"]
+    allowed_methods = ["GET", "HEAD"]
     allowed_origins = ["https://${local.web_fqdn}"]
-    allowed_headers = ["Content-Type"]
+    allowed_headers = ["*"]
     max_age_seconds = 3600
   }
 }
@@ -96,6 +100,8 @@ resource "aws_s3_bucket_public_access_block" "web" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
   bucket = aws_s3_bucket.web.id
   rule {
+    blocked_encryption_types = ["SSE-C"]
+    bucket_key_enabled       = false
     apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
   }
 }

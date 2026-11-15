@@ -3,6 +3,7 @@
   import * as api from "#lib/api/client.ts";
   import { auth } from "#lib/stores/auth.svelte.ts";
   import type { DnsCheckResult } from "@dork-mail/shared";
+  import PageHeader from "#lib/components/PageHeader.svelte";
 
   // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@
   let selfIdentity = $derived(verifiedEmails.find(e => e.email === auth.email));
 
   $effect(() => {
-    if (!auth.isAdmin) goto("/mail");
+    if (!auth.isAdmin) goto("/admin/account");
   });
 
   $effect(() => { load(); });
@@ -127,12 +128,11 @@
   }
 </script>
 
+<PageHeader title="Setup / DNS">
+  <button class="btn btn-ghost" onclick={load} disabled={loading}>Refresh</button>
+</PageHeader>
+
 <div class="setup-page">
-  <header class="page-header">
-    <a href="/mail" class="back">← Mail</a>
-    <h1>Setup & DNS Wizard</h1>
-    <button class="btn btn-ghost" onclick={load} disabled={loading}>↺ Refresh</button>
-  </header>
 
   {#if loading}
     <div class="state-msg">Checking status…</div>
@@ -373,18 +373,17 @@
 
 <style>
   .setup-page {
-    max-width: 800px;
+    width: 100%;
+    max-width: 768px;
     margin: 0 auto;
-    padding: calc(20px + var(--safe-top)) 20px calc(28px + var(--safe-bottom));
+    padding: 24px 24px calc(32px + var(--safe-bottom));
     display: flex;
     flex-direction: column;
     gap: 20px;
     overflow-y: auto;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
   }
-  .page-header { display: flex; align-items: center; gap: 16px; }
-  .page-header h1 { flex: 1; font-size: 20px; font-weight: 700; }
-  .back { font-weight: 500; white-space: nowrap; }
 
   .state-msg { padding: 60px; text-align: center; color: var(--text-secondary); }
   .state-msg.error { color: var(--danger); }
@@ -399,14 +398,14 @@
     gap: 14px;
   }
   .ok-card { flex-direction: row; align-items: flex-start; gap: 16px; }
-  .ok-icon { font-size: 22px; color: var(--success); }
-  h2 { font-size: 15px; font-weight: 600; }
-  .hint { font-size: 13px; color: var(--text-secondary); }
+  .ok-icon { font-size: 1.375rem; color: var(--success); }
+  h2 { font-size: 1.125rem; font-weight: 500; }
+  .hint { font-size: 0.875rem; color: var(--text-secondary); }
 
   /* Sandbox card */
   .sandbox-card { border-color: rgba(208, 170, 91, 0.4); background: rgba(208, 170, 91, 0.05); }
   .sandbox-header { display: flex; gap: 14px; align-items: flex-start; }
-  .sandbox-icon { font-size: 22px; color: var(--warning); }
+  .sandbox-icon { font-size: 1.375rem; color: var(--warning); }
   .quota-row { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .quota-item {
     flex: 1;
@@ -418,20 +417,20 @@
     gap: 2px;
   }
   .quota-item:last-child { border-right: none; }
-  .quota-val { font-size: 20px; font-weight: 700; color: var(--text-primary); }
-  .quota-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .quota-val { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
+  .quota-label { font-size: 0.6875rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .sandbox-steps { display: flex; flex-direction: column; gap: 10px; }
-  .sandbox-steps h3 { font-size: 13px; font-weight: 600; }
-  .prod-input { width: 100%; padding: 8px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--text-primary); font-family: inherit; resize: vertical; }
+  .sandbox-steps h3 { font-size: 0.8125rem; font-weight: 600; }
+  .prod-input { width: 100%; padding: 8px 12px; font-size: 0.8125rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--text-primary); font-family: inherit; resize: vertical; }
 
   .review-pending {
     display: flex; gap: 12px; align-items: flex-start;
     background: rgba(91,138,208,.08); border: 1px solid rgba(91,138,208,.25);
     border-radius: var(--radius-sm); padding: 12px 14px;
   }
-  .review-icon { font-size: 18px; }
-  .review-failed { color: var(--danger); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
-  .mono { font-family: var(--font-mono); font-size: 12px; }
+  .review-icon { font-size: 1.125rem; }
+  .review-failed { color: var(--danger); font-size: 0.8125rem; display: flex; flex-direction: column; gap: 4px; }
+  .mono { font-family: var(--font-mono); font-size: 0.75rem; }
 
   /* Your Email Identity */
   .identity-verified { border-color: rgba(91,208,138,.35); background: rgba(91,208,138,.04); }
@@ -442,7 +441,7 @@
   .identity-badge {
     padding: 2px 12px;
     border-radius: 99px;
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 600;
     white-space: nowrap;
     flex-shrink: 0;
@@ -450,14 +449,14 @@
   .identity-badge.ok      { background: rgba(91,208,138,.15); color: var(--success); }
   .identity-badge.pending { background: rgba(208,170,91,.15); color: var(--warning); }
   .identity-badge.missing { background: rgba(208,91,106,.12); color: var(--danger); }
-  .identity-email { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius-sm); }
-  .identity-ok-msg { font-size: 13px; color: var(--success); }
+  .identity-email { font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-primary); background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius-sm); }
+  .identity-ok-msg { font-size: 0.8125rem; color: var(--success); }
 
   /* Verified emails */
   .add-email-row { display: flex; gap: 8px; }
   .add-email-row input { flex: 1; padding: 8px 12px; }
-  .success { color: var(--success); font-size: 13px; }
-  .err { color: var(--danger); font-size: 13px; }
+  .success { color: var(--success); font-size: 0.8125rem; }
+  .err { color: var(--danger); font-size: 0.8125rem; }
   .email-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
   .email-row {
     display: flex;
@@ -466,18 +465,18 @@
     padding: 8px 12px;
     background: var(--bg-raised);
     border-radius: var(--radius-sm);
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
   .email-addr { flex: 1; }
-  .email-status { font-size: 12px; font-weight: 600; }
-  .remove-btn { font-size: 12px; color: var(--text-muted); padding: 2px 6px; }
-  .none-msg { font-size: 13px; color: var(--text-muted); }
+  .email-status { font-size: 0.75rem; font-weight: 600; }
+  .remove-btn { font-size: 0.75rem; color: var(--text-muted); padding: 2px 6px; }
+  .none-msg { font-size: 0.8125rem; color: var(--text-muted); }
 
   /* SES status */
   .status-row { display: flex; align-items: center; gap: 10px; }
-  .label { color: var(--text-muted); font-size: 13px; width: 60px; }
-  .badge { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
-  .sm { font-size: 12px; padding: 4px 10px; }
+  .label { color: var(--text-muted); font-size: 0.8125rem; width: 60px; }
+  .badge { padding: 2px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; }
+  .sm { font-size: 0.75rem; padding: 4px 10px; }
 
   /* DNS issues */
   .issues { list-style: none; display: flex; flex-direction: column; gap: 8px; }
@@ -490,16 +489,16 @@
     gap: 6px;
   }
   .issue-header { display: flex; align-items: center; gap: 10px; }
-  .record-type { font-size: 11px; font-weight: 700; background: var(--accent-dim); color: var(--accent); padding: 1px 7px; border-radius: 99px; }
-  .issue-name { font-size: 13px; color: var(--text-muted); }
-  .fix-record { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); background: var(--bg-base); padding: 4px 8px; border-radius: var(--radius-sm); }
+  .record-type { font-size: 0.625rem; font-weight: 500; background: var(--accent-dim); color: var(--accent-dim-text); padding: 2px 6px; border-radius: 4px; }
+  .issue-name { font-size: 0.8125rem; color: var(--text-muted); }
+  .fix-record { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-base); padding: 4px 8px; border-radius: var(--radius-sm); }
 
   /* DNS table */
-  .records-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .records-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
   .records-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   .records-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   .mono { font-family: var(--font-mono); word-break: break-all; }
-  .small { font-size: 11px; }
+  .small { font-size: 0.6875rem; }
   .missing { color: var(--text-muted); font-style: italic; }
   .ok { color: var(--success); }
   .bad { color: var(--danger); }

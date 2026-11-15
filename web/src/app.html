@@ -11,16 +11,48 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Dork Mail" />
     <link rel="apple-touch-icon" href="%sveltekit.assets%/icon-192.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Dork Mail</title>
     <script>
-      // Runs before first paint so the page never flashes the wrong theme.
+      // Applies Bulwark's appearance settings, which it keeps in this origin's localStorage, before
+      // first paint and again whenever Bulwark changes them in another tab. Mirrors Bulwark 1.21's
+      // theme-storage and settings-storage shapes.
       (function () {
-        var pref = "system";
-        try { pref = localStorage.getItem("dm:theme") || "system"; } catch (e) {}
-        var dark = pref === "dark" || (pref === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.dataset.theme = dark ? "dark" : "light";
-        document.querySelector('meta[name="theme-color"]').content = dark ? "#161922" : "#ffffff";
+        var root = document.documentElement;
+        var systemDark = matchMedia("(prefers-color-scheme: dark)");
+        var FONT_SCALE = { small: 0.875, medium: 1, large: 1.125, "x-large": 1.25, "xx-large": 1.5, "xxx-large": 1.75, huge: 2 };
+
+        function read(key) {
+          try { return JSON.parse(localStorage.getItem(key)).state || {}; } catch (e) { return {}; }
+        }
+
+        function apply() {
+          var theme = read("theme-storage");
+          var settings = read("settings-storage");
+          var pref = theme.theme || "system";
+          var variant = pref === "dark" || (pref === "system" && systemDark.matches) ? "dark" : "light";
+          root.classList.toggle("dark", variant === "dark");
+          document.querySelector('meta[name="theme-color"]').content = variant === "dark" ? "#0a0a0a" : "#ffffff";
+
+          var active = (theme.installedThemes || []).filter(function (t) { return t.id === theme.activeThemeId; })[0];
+          var style = document.getElementById("bulwark-theme");
+          if (!style) {
+            style = document.createElement("style");
+            style.id = "bulwark-theme";
+            document.head.appendChild(style);
+          }
+          style.textContent = active && active.css && (active.variants || []).indexOf(variant) >= 0 ? active.css : "";
+
+          root.style.setProperty("--font-size-base", 100 * (FONT_SCALE[settings.fontSize] || 1) + "%");
+          var motion = settings.reduceMotion === "on" ? "reduce" : settings.reduceMotion === "off" ? "full" : null;
+          if (motion) root.setAttribute("data-motion", motion);
+          else root.removeAttribute("data-motion");
+        }
+
+        apply();
+        systemDark.addEventListener("change", apply);
+        addEventListener("storage", function (e) {
+          if (e.key === "theme-storage" || e.key === "settings-storage") apply();
+        });
       })();
     </script>
     %sveltekit.head%

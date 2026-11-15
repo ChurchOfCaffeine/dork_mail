@@ -5,8 +5,8 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [
     sveltekit({
-      // SPA mode — index.html serves all routes; CloudFront handles 403/404 → /
-      adapter: adapter({ fallback: "index.html" }),
+      // SPA mode. The root index.html belongs to Bulwark; CloudFront routes /admin/* to this fallback.
+      adapter: adapter({ fallback: "admin/index.html" }),
     }),
   ],
   server: {

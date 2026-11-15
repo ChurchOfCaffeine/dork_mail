@@ -6,24 +6,24 @@
  */
 import type { S3Event, SESEvent } from "aws-lambda";
 import { Logger } from "@aws-lambda-powertools/logger";
-import { Tracer } from "@aws-lambda-powertools/tracer";
 import { Metrics, MetricUnit } from "@aws-lambda-powertools/metrics";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { simpleParser, type AddressObject } from "mailparser";
 import type { StoredEmail, EmailAddress, Attachment, MailFolder } from "@dork-mail/shared";
 import isEmail from "validator/lib/isEmail";
-import { mailboxPk, mailboxFolderKey, makeSnippet, makeSearchText, storeBodies } from "../lib/mail-store";
-import { notifyNewMail } from "../lib/push";
+import {
+  emailSk, mailboxPk, mailboxFolderKey, mailboxThreadKey, makeSnippet, makeSearchText, storeBodies, threadIdFor,
+} from "../lib/mail-store";
+import { CommitConflict, commitChange, countDelta } from "../lib/mail-state";
+import { emailIdFor } from "../jmap/ids";
 
 const logger = new Logger({ serviceName: "email-ingest" });
-const tracer = new Tracer({ serviceName: "email-ingest" });
 const metrics = new Metrics({ namespace: "DorkMail", serviceName: "email-ingest" });
 
-const s3 = tracer.captureAWSv3Client(new S3Client({}));
-const dynamo = tracer.captureAWSv3Client(new DynamoDBClient({}));
-const ddb = DynamoDBDocumentClient.from(dynamo, {
+const s3 = new S3Client({});
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
 });
 
@@ -36,15 +36,20 @@ const INCOMING_PREFIX = "incoming/";
 interface Envelope {
   recipients: string[];
   spam: boolean;
+  virus: boolean;
 }
 
 export const handler = async (event: S3Event | SESEvent): Promise<void> => {
   for (const record of event.Records) {
     if ("ses" in record) {
       const { mail, receipt } = record.ses;
+      // Only when the sender's domain asks receivers to act on failures, so mailing lists that break alignment still arrive.
+      const dmarcFail = receipt.dmarcVerdict?.status === "FAIL" && ["quarantine", "reject"].includes(receipt.dmarcPolicy?.toLowerCase() ?? "");
+      const virus = receipt.virusVerdict.status === "FAIL";
       await ingestOne(BUCKET, `${INCOMING_PREFIX}${mail.messageId}`, {
         recipients: receipt.recipients,
-        spam: receipt.spamVerdict.status === "FAIL" || receipt.virusVerdict.status === "FAIL",
+        spam: receipt.spamVerdict.status === "FAIL" || virus || dmarcFail,
+        virus,
       });
     } else {
       await ingestOne(record.s3.bucket.name, decodeURIComponent(record.s3.object.key.replace(/\+/g, " ")));
@@ -59,16 +64,20 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
   const raw = Buffer.from(await obj.Body!.transformToByteArray());
   const parsed = await simpleParser(raw, { keepCidLinks: true });
 
-  const messageId = stripBrackets(parsed.messageId ?? key.split("/").pop()!);
-  const receivedAt = (parsed.date ?? new Date()).toISOString();
-  const ts = receivedAt.replace(/[:.]/g, "-");
+  // SES names the raw object, so unlike the Message-ID a sender can't pick it and collide with other mail's parts.
+  const objectId = key.split("/").pop()!;
+  const messageId = stripBrackets(parsed.messageId ?? objectId);
+  // When SES stored the message, so the same object gets the same sort key on reprocessing.
+  const receivedAt = (obj.LastModified ?? new Date()).toISOString();
+  const sentAt = parsed.date?.toISOString();
 
   const toAddresses = toEmailAddresses(parsed.to);
   const ccAddresses = toEmailAddresses(parsed.cc);
 
   // Header verdicts are only a fallback for S3 reprocessing: a sender can forge them.
-  const spam = envelope?.spam ?? [parsed.headers.get("x-ses-spam-verdict"), parsed.headers.get("x-ses-virus-verdict")]
-    .some(v => String(v ?? "").toUpperCase() === "FAIL");
+  const headerFail = (name: string) => String(parsed.headers.get(name) ?? "").toUpperCase() === "FAIL";
+  const virus = envelope?.virus ?? headerFail("x-ses-virus-verdict");
+  const spam = envelope?.spam ?? (virus || headerFail("x-ses-spam-verdict"));
   const folder: MailFolder = spam ? "spam" : "inbox";
 
   const mailboxes = await localMailboxes(envelope?.recipients ?? [...toAddresses, ...ccAddresses].map(a => a.address));
@@ -77,21 +86,25 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
     return;
   }
 
-  const attachments = await storeAttachments(bucket, messageId, parsed.attachments ?? []);
+  const attachments = virus ? [] : await storeAttachments(bucket, objectId, parsed.attachments ?? []);
   const bodyText = parsed.text || undefined;
   const bodyHtml = parsed.html || undefined;
   const snippet = makeSnippet(bodyText, bodyHtml);
-  const bodies = await storeBodies(s3, bucket, `bodies/${messageId}.json`, bodyText, bodyHtml);
+  const bodies = await storeBodies(s3, bucket, `bodies/${objectId}.json`, bodyText, bodyHtml);
 
   const refs = parsed.references ? [parsed.references].flat().map(stripBrackets) : undefined;
+  const inReplyTo = parsed.inReplyTo ? stripBrackets(parsed.inReplyTo) : undefined;
   const from = toEmailAddresses(parsed.from)[0] ?? { address: "unknown" };
   const subject = parsed.subject ?? "(no subject)";
+  const threadId = threadIdFor({ messageId, inReplyTo, references: refs });
 
   for (const mailbox of mailboxes) {
     const email: StoredEmail = {
       pk: mailboxPk(mailbox),
-      sk: `ts#${ts}#${messageId}`,
+      sk: emailSk(receivedAt, messageId),
       mailboxFolder: mailboxFolderKey(mailbox, folder),
+      threadId,
+      mailboxThread: mailboxThreadKey(mailbox, threadId),
       messageId,
       from,
       to: toAddresses,
@@ -101,11 +114,13 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
       snippet,
       searchText: makeSearchText({ from, to: toAddresses, cc: ccAddresses, subject, snippet }),
       ...bodies,
-      inReplyTo: parsed.inReplyTo ? stripBrackets(parsed.inReplyTo) : undefined,
+      inReplyTo,
       references: refs,
       attachments: attachments.length ? attachments : undefined,
       rawKey: key,
+      size: raw.byteLength,
       receivedAt,
+      sentAt,
       read: false,
       starred: false,
       labels: [],
@@ -113,16 +128,17 @@ async function ingestOne(bucket: string, key: string, envelope?: Envelope): Prom
     };
 
     try {
-      await ddb.send(new PutCommand({ TableName: TABLE, Item: email, ConditionExpression: "attribute_not_exists(pk)" }));
+      await commitChange(ddb, TABLE, mailbox, { created: [emailIdFor(email.sk)], threads: [threadId] }, () => [
+        { Put: { TableName: TABLE, Item: email, ConditionExpression: "attribute_not_exists(pk)" } },
+      ], countDelta(undefined, email));
     } catch (err) {
-      if ((err as Error).name === "ConditionalCheckFailedException") {
+      if (err instanceof CommitConflict) {
         logger.info("Already ingested", { mailbox, messageId });
         continue;
       }
       throw err;
     }
     logger.info("Stored email", { mailbox, messageId, folder });
-    if (folder === "inbox") await notifyNewMail(ddb, TABLE, logger, mailbox, email);
   }
 
   metrics.addMetric(spam ? "SpamIngested" : "EmailsIngested", MetricUnit.Count, 1);
@@ -155,7 +171,7 @@ async function localMailboxes(recipients: string[]): Promise<string[]> {
 
 async function storeAttachments(
   bucket: string,
-  messageId: string,
+  objectId: string,
   parts: Awaited<ReturnType<typeof simpleParser>>["attachments"],
 ): Promise<Attachment[]> {
   const used = new Set<string>();
@@ -170,7 +186,7 @@ async function storeAttachments(
         filename,
         contentType: part.contentType,
         size: part.size,
-        s3Key: `attachments/${messageId}/${safeName}`,
+        s3Key: `attachments/${objectId}/${safeName}`,
         contentId: part.contentId ? stripBrackets(part.contentId) : undefined,
       } satisfies Attachment,
     };

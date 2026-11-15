@@ -38,10 +38,10 @@
     background: #23262f;
     color: #f1f2f6;
     box-shadow: var(--shadow-lg);
-    font-size: 14px;
+    font-size: 0.875rem;
     pointer-events: auto;
   }
-  :global([data-theme="dark"]) .toast { background: #e9ebf3; color: #171a24; }
+  :global(.dark) .toast { background: #e9ebf3; color: #171a24; }
   .toast.error { background: var(--danger); color: #fff; }
   .msg { padding-right: 6px; }
   .action {
@@ -50,7 +50,7 @@
     padding: 6px 10px;
     border-radius: var(--radius-sm);
   }
-  :global([data-theme="dark"]) .action { color: #4351b5; }
+  :global(.dark) .action { color: #4351b5; }
   .toast.error .action { color: #fff; text-decoration: underline; }
 
   @media (max-width: 767px) {

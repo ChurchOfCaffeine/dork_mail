@@ -6,7 +6,7 @@
   import type { UserPublic } from "@dork-mail/shared";
 
   // Redirect non-admins
-  if (!auth.isAdmin) goto("/mail");
+  if (!auth.isAdmin) goto("/admin/account");
 
   let users = $state<UserPublic[]>([]);
   let loading = $state(true);
@@ -172,22 +172,22 @@
   }
 
   .page {
-    padding: 24px 24px calc(24px + var(--safe-bottom));
-    max-width: 640px;
+    padding: 24px 24px calc(32px + var(--safe-bottom));
+    max-width: 768px;
     margin: 0 auto;
   }
 
   .card {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    margin-bottom: 20px;
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    margin-bottom: 24px;
   }
 
   h2 {
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 1.125rem;
+    font-weight: 500;
     color: var(--text-primary);
     margin: 0 0 16px;
     display: flex;
@@ -196,7 +196,7 @@
   }
 
   .count {
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 400;
     color: var(--text-muted);
     background: var(--bg-hover);
@@ -230,24 +230,24 @@
   }
 
   .user-name {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
   }
 
   .user-email {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-muted);
   }
 
   .badge {
-    font-size: 11px;
-    padding: 1px 6px;
-    border-radius: 8px;
+    font-size: 0.625rem;
+    padding: 2px 6px;
+    border-radius: 4px;
     font-weight: 500;
   }
-  .badge-admin { background: var(--accent-dim); color: var(--accent); }
-  .badge-self  { background: var(--bg-hover); color: var(--text-muted); }
+  .badge-admin { background: var(--accent-dim); color: var(--accent-dim-text); }
+  .badge-self  { background: var(--bg-raised); color: var(--text-muted); }
 
   .user-actions {
     display: flex;
@@ -255,14 +255,14 @@
     flex-shrink: 0;
   }
 
-  .btn-sm { font-size: 12px; padding: 4px 10px; }
+  .btn-sm { min-height: 32px; font-size: 0.875rem; padding: 0 10px; }
   .btn-danger { color: var(--danger); background: transparent; }
   .btn-danger:hover { background: var(--danger-dim); }
 
   .row-error {
     width: 100%;
     margin: 4px 0 0;
-    font-size: 12px;
+    font-size: 0.75rem;
     color: var(--danger);
   }
 
@@ -284,11 +284,9 @@
   }
 
   label {
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 500;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    color: var(--text-primary);
   }
 
   .checkbox-label {
@@ -296,7 +294,7 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 14px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-secondary);
     cursor: pointer;
     text-transform: none;
@@ -307,16 +305,12 @@
   input[type="text"],
   input[type="email"],
   input[type="password"] {
-    padding: 8px 10px;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-size: 14px;
+    height: 40px;
+    padding: 0 12px;
+    font-size: 0.875rem;
   }
-  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-  .muted   { color: var(--text-muted); font-size: 14px; }
-  .success { color: var(--accent); font-size: 13px; margin: 0 0 12px; }
-  .error   { color: var(--danger); font-size: 13px; margin: 0 0 12px; }
+  .muted   { color: var(--text-muted); font-size: 0.875rem; }
+  .success { color: var(--success); font-size: 0.8125rem; margin: 0 0 12px; }
+  .error   { color: var(--danger); font-size: 0.8125rem; margin: 0 0 12px; }
 </style>

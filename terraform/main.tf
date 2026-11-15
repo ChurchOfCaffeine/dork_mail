@@ -2,10 +2,13 @@ terraform {
   required_version = ">= 1.7"
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
+      source = "hashicorp/aws"
+      # 6.37.0 fixed key_schema GSIs being dropped and rebuilt on unrelated GSI changes.
+      version = ">= 6.37.0, < 7.0.0"
     }
     archive = {
       source  = "hashicorp/archive"
+      version = ">= 2.0.0, < 3.0.0"
     }
   }
 }
@@ -40,8 +43,8 @@ data "aws_route53_zone" "main" {
 }
 
 locals {
-  hosted_zone_id  = data.aws_route53_zone.main.zone_id
-  web_fqdn        = "${var.web_subdomain}.${var.domain}"
-  name_prefix     = "dork-mail"
-  ses_inbound_ep  = "inbound-smtp.${var.aws_region}.amazonaws.com"
+  hosted_zone_id = data.aws_route53_zone.main.zone_id
+  web_fqdn       = "${var.web_subdomain}.${var.domain}"
+  name_prefix    = "dork-mail"
+  ses_inbound_ep = "inbound-smtp.${var.aws_region}.amazonaws.com"
 }

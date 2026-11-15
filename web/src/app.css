@@ -1,88 +1,108 @@
 /* ─── Design tokens ──────────────────────────────────────────────────────── */
+/*
+ * Bulwark's own variable names and default values, so the active Bulwark theme that app.html
+ * injects overrides them exactly as it does in the mail UI. :where() keeps these defaults at zero
+ * specificity, so the theme wins whichever stylesheet loads last.
+ */
+:where(:root) {
+  --color-background: #fff;
+  --color-foreground: #0f172a;
+  --color-card: #fff;
+  --color-sidebar: #f8fafc;
+  --color-sidebar-accent: #f1f5f9;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #59687c;
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-ring: #2563eb;
+  --color-primary: #185aea;
+  --color-primary-foreground: #fff;
+  --color-accent: #dbeafe;
+  --color-accent-foreground: #1e40af;
+  --color-destructive: #dc2626;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --font-size-base: 100%;
+
+  --bg-overlay: rgba(15, 23, 42, 0.4);
+  --shadow:     0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-lg:  0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  color-scheme: light;
+}
+
+:where(.dark) {
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #141414;
+  --color-sidebar: #0a0a0a;
+  --color-sidebar-accent: #1a1a1a;
+  --color-muted: #262626;
+  --color-muted-foreground: #adadad;
+  --color-border: #8080804d;
+  --color-input: #262626;
+  --color-ring: #d4d4d4;
+  --color-primary: #fafafa;
+  --color-primary-foreground: #171717;
+  --color-accent: #1e3a8a;
+  --color-accent-foreground: #dbeafe;
+  --color-destructive: #ef4444;
+  --color-success: #16a34a;
+  --color-warning: #ca8a04;
+
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+  --shadow:     0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg:  0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
 :root {
-  --bg-base:      #f6f7fb;
-  --bg-surface:   #ffffff;
-  --bg-raised:    #eef0f6;
-  --bg-hover:     #e8eaf3;
-  --bg-overlay:   rgba(15, 17, 23, 0.4);
-  --border:       #e1e4ee;
-  --border-focus: #5b6ad0;
+  --bg-base:      var(--color-background);
+  --bg-surface:   var(--color-card);
+  --bg-sidebar:   var(--color-sidebar);
+  --bg-raised:    var(--color-muted);
+  --bg-hover:     var(--color-sidebar-accent);
+  --border:       var(--color-border);
+  --border-input: var(--color-input);
+  --border-focus: var(--color-ring);
 
-  --text-primary:   #171a24;
-  --text-secondary: #545a70;
-  --text-muted:     #8b90a3;
-  --text-on-accent: #ffffff;
+  --text-primary:   var(--color-foreground);
+  --text-secondary: var(--color-muted-foreground);
+  --text-muted:     var(--color-muted-foreground);
+  --text-on-accent: var(--color-primary-foreground);
 
-  --accent:       #4f5ec7;
-  --accent-hover: #4351b5;
-  --accent-dim:   rgba(91, 106, 208, 0.12);
+  --accent:          var(--color-primary);
+  --accent-hover:    color-mix(in oklab, var(--color-primary) 90%, transparent);
+  --accent-dim:      var(--color-accent);
+  --accent-dim-text: var(--color-accent-foreground);
 
-  --danger:       #c8424f;
-  --danger-dim:   rgba(200, 66, 79, 0.12);
-  --success:      #2b9a5c;
-  --warning:      #c98a12;
+  --danger:     var(--color-destructive);
+  --danger-dim: color-mix(in oklab, var(--color-destructive) 12%, transparent);
+  --success:    var(--color-success);
+  --warning:    var(--color-warning);
 
-  --swipe-archive: #2b9a5c;
-  --swipe-trash:   #c8424f;
-
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --radius-sm: 6px;
-  --radius:    10px;
-  --radius-lg: 14px;
-
-  --shadow:    0 1px 2px rgba(16, 20, 40, 0.06), 0 4px 16px rgba(16, 20, 40, 0.08);
-  --shadow-lg: 0 8px 32px rgba(16, 20, 40, 0.18);
+  --radius:    6px;
+  --radius-lg: 8px;
 
   --safe-top:    env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --header-h:    56px;
-
-  color-scheme: light;
-}
-
-/* app.html sets data-theme before first paint, resolving "system" from prefers-color-scheme */
-:root[data-theme="dark"] {
-  --bg-base:      #0f1117;
-  --bg-surface:   #161922;
-  --bg-raised:    #1e2230;
-  --bg-hover:     #252a3b;
-  --bg-overlay:   rgba(0, 0, 0, 0.55);
-  --border:       #262b3b;
-  --border-focus: #6f7ee0;
-
-  --text-primary:   #e4e6f1;
-  --text-secondary: #9aa0b8;
-  --text-muted:     #626a86;
-
-  --accent:       #7584ea;
-  --accent-hover: #8794f0;
-  --accent-dim:   rgba(117, 132, 234, 0.16);
-
-  --danger:       #e06674;
-  --danger-dim:   rgba(224, 102, 116, 0.14);
-  --success:      #4fc483;
-  --warning:      #e0b04f;
-
-  --swipe-archive: #2f8f58;
-  --swipe-trash:   #b8404e;
-
-  --shadow:    0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-
-  color-scheme: dark;
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Bulwark's text size setting scales the root, so every size below is in rem. */
+html { font-size: var(--font-size-base); }
 
 html, body {
   height: 100%;
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -90,7 +110,7 @@ html, body {
   overscroll-behavior: none;
 }
 
-body { overflow: hidden; }
+body { overflow: hidden; font-size: 0.875rem; }
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); }
@@ -110,13 +130,14 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 input, textarea, select {
   font-family: inherit;
   font-size: inherit;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--bg-base);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s;
 }
+input:hover:not(:disabled), textarea:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--text-muted); }
 input:focus, textarea:focus, select:focus { border-color: var(--border-focus); }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
@@ -131,18 +152,19 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 16px;
-  min-height: 36px;
+  padding: 0 16px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
+  font-size: 0.875rem;
   font-weight: 500;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
   white-space: nowrap;
 }
-.btn-primary { background: var(--accent); color: var(--text-on-accent); }
+.btn-primary { background: var(--accent); color: var(--text-on-accent); box-shadow: var(--shadow); }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--text-on-accent); }
-.btn-ghost { color: var(--text-secondary); background: transparent; }
-.btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-.btn-danger { background: var(--danger); color: #fff; }
+.btn-ghost { color: var(--text-primary); background: transparent; }
+.btn-ghost:hover:not(:disabled) { background: var(--accent-dim); color: var(--accent-dim-text); }
+.btn-danger { background: var(--danger); color: #fff; box-shadow: var(--shadow); }
 
 .icon-btn {
   display: inline-flex;
@@ -151,22 +173,22 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   width: 40px;
   height: 40px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, color 0.2s;
 }
-.icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:hover:not(:disabled) { background: var(--bg-raised); color: var(--text-primary); }
 .icon-btn.active { color: var(--accent); }
 .icon-btn.danger:hover:not(:disabled) { color: var(--danger); }
 
 .badge {
   display: inline-block;
-  padding: 1px 7px;
-  border-radius: 99px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.625rem;
+  font-weight: 500;
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--accent-dim-text);
 }
 
 .divider { height: 1px; background: var(--border); margin: 8px 0; }
@@ -186,6 +208,12 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinning { animation: spin 0.8s linear infinite; }
 
+/* Bulwark's reduce motion setting: on, off, or unset to follow the system. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  :root:not([data-motion="full"]) *, :root:not([data-motion="full"]) *::before, :root:not([data-motion="full"]) *::after {
+    animation-duration: 0.01ms !important; transition-duration: 0.01ms !important;
+  }
+}
+:root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important; transition-duration: 0.01ms !important;
 }

@@ -1,18 +1,23 @@
 <script lang="ts">
   import "../app.css";
-  import { goto } from "$app/navigation";
-  import { page } from "$app/state";
   import { auth } from "#lib/stores/auth.svelte.ts";
-
-  const PUBLIC_ROUTES = ["/login"];
+  import * as api from "#lib/api/client.ts";
 
   let { children } = $props();
 
+  let ready = $state(false);
+
+  // The cookie decides who is signed in, so a token left from another Bulwark account is replaced.
   $effect(() => {
-    if (!auth.isAuthenticated && !PUBLIC_ROUTES.some(r => page.url.pathname.startsWith(r))) {
-      goto("/login");
-    }
+    api.session()
+      .then(s => {
+        auth.login(s.token, s.email, s.displayName, s.isAdmin);
+        ready = true;
+      })
+      .catch(() => api.redirectToSignIn());
   });
 </script>
 
-{@render children()}
+{#if ready}
+  {@render children()}
+{/if}

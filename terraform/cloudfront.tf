@@ -1,6 +1,7 @@
 # ─── SPA routing function ─────────────────────────────────────────────────────
-# Rewrites non-asset requests to /index.html so SvelteKit client-side routing
-# works. This replaces custom_error_response, which applied to ALL origins and
+# Maps routes to the HTML shell that serves them: Bulwark Lite at the root, with
+# one shell per /<locale>/<surface>, and the SvelteKit admin app under /admin.
+# This replaces custom_error_response, which applied to ALL origins and
 # converted API 403/404s into HTML pages.
 
 resource "aws_cloudfront_function" "spa_router" {
@@ -10,15 +11,73 @@ resource "aws_cloudfront_function" "spa_router" {
   code    = <<-JS
     async function handler(event) {
       const uri = event.request.uri;
-      // Serve static assets as-is (anything with a file extension)
       if (/\.[a-zA-Z0-9]+$/.test(uri)) {
         return event.request;
       }
-      // Everything else is a SPA route — serve index.html
-      event.request.uri = '/index.html';
+      if (uri === '/admin' || uri.startsWith('/admin/')) {
+        event.request.uri = '/admin/index.html';
+        return event.request;
+      }
+      const surface = uri.match(/^\/([a-zA-Z-]+)\/(mail|calendar|contacts|files|settings)(\/.*)?$/);
+      if (surface) {
+        event.request.uri = '/' + surface[1] + '/' + surface[2] + '/index.html';
+        return event.request;
+      }
+      event.request.uri = uri.replace(/\/?$/, '/index.html');
       return event.request;
     }
   JS
+}
+
+# See terraform/upload.tf for why uploads need these headers rewritten.
+resource "aws_cloudfront_function" "jmap_upload" {
+  name    = "${local.name_prefix}-jmap-upload"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-JS
+    async function handler(event) {
+      const headers = event.request.headers;
+      headers['x-blob-type'] = { value: headers['content-type'] ? headers['content-type'].value : 'application/octet-stream' };
+      headers['content-type'] = { value: 'application/octet-stream' };
+      headers['accept'] = { value: 'application/json' };
+      return event.request;
+    }
+  JS
+}
+
+# Bulwark's own _headers policy, which S3 can't serve.
+resource "aws_cloudfront_response_headers_policy" "web" {
+  name = "${local.name_prefix}-web"
+
+  security_headers_config {
+    content_type_options { override = true }
+    frame_options {
+      frame_option = "SAMEORIGIN"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+    strict_transport_security {
+      access_control_max_age_sec = 63072000
+      include_subdomains         = false
+      override                   = true
+    }
+    # Everything Bulwark calls is same-origin except the presigned S3 URLs that downloads redirect to.
+    content_security_policy {
+      content_security_policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' https: data:; connect-src 'self' https://${aws_s3_bucket.emails.id}.s3.${var.aws_region}.amazonaws.com https://${aws_s3_bucket.emails.id}.s3.amazonaws.com; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; media-src 'self' blob:"
+      override                = true
+    }
+  }
+
+  custom_headers_config {
+    items {
+      header   = "Permissions-Policy"
+      value    = "camera=(), microphone=(), geolocation=(), payment=()"
+      override = true
+    }
+  }
 }
 
 # ─── TLS Certificate (must be in us-east-1 for CloudFront) ───────────────────
@@ -65,6 +124,22 @@ resource "aws_cloudfront_origin_access_control" "web" {
   signing_protocol                  = "sigv4"
 }
 
+# ─── Cache and origin request policies ───────────────────────────────────────
+# With caching disabled, AllViewerExceptHostHeader forwards Authorization and the
+# dm_session cookie. Excluding Host lets API Gateway match its own endpoint name.
+
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
+data "aws_cloudfront_cache_policy" "caching_disabled" {
+  name = "Managed-CachingDisabled"
+}
+
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
 # ─── CloudFront Distribution ──────────────────────────────────────────────────
 
 resource "aws_cloudfront_distribution" "web" {
@@ -92,6 +167,19 @@ resource "aws_cloudfront_distribution" "web" {
     }
   }
 
+  # Origin 3: upload REST API, terraform/upload.tf
+  origin {
+    domain_name = "${aws_api_gateway_rest_api.upload.id}.execute-api.${var.aws_region}.amazonaws.com"
+    origin_id   = "upload-api"
+    origin_path = "/${aws_api_gateway_stage.upload.stage_name}"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   # Default: S3 with SPA router — rewrites unknown paths to /index.html
   # No custom_error_response needed, so API errors are never converted to HTML.
   default_cache_behavior {
@@ -100,40 +188,46 @@ resource "aws_cloudfront_distribution" "web" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
+    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
 
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.spa_router.arn
     }
 
-    min_ttl     = 0
-    default_ttl = 3600
-    max_ttl     = 86400
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web.id
   }
 
-  # /api/* → API Gateway, no caching, errors pass through as-is
+  # Must come before /jmap/*, CloudFront takes the first matching behavior.
   ordered_cache_behavior {
-    path_pattern           = "/api/*"
-    target_origin_id       = "api-gw"
-    viewer_protocol_policy = "https-only"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
+    path_pattern             = "/jmap/upload/*"
+    target_origin_id         = "upload-api"
+    viewer_protocol_policy   = "https-only"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    compress                 = false
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
 
-    forwarded_values {
-      query_string = true
-      headers      = ["Authorization", "Content-Type"]
-      cookies { forward = "none" }
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.jmap_upload.arn
     }
+  }
 
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
+  # API Gateway, no caching, errors pass through as-is
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/api/*", "/jmap/*", "/auth/*", "/.well-known/*"]
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "api-gw"
+      viewer_protocol_policy   = "https-only"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      compress                 = true
+      cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    }
   }
 
   restrictions {

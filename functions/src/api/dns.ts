@@ -11,7 +11,6 @@
  */
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { Logger } from "@aws-lambda-powertools/logger";
-import { Tracer } from "@aws-lambda-powertools/tracer";
 import {
   Route53Client,
   ListResourceRecordSetsCommand,
@@ -38,20 +37,20 @@ import {
   MailType,
   ContactLanguage,
 } from "@aws-sdk/client-sesv2";
+import isEmail from "validator/lib/isEmail";
 import type { DnsCheckResult, DnsRecord, DkimRecord } from "@dork-mail/shared";
 import { json, parseBody, withErrors } from "../lib/http";
 
 const logger = new Logger({ serviceName: "api-dns" });
-const tracer = new Tracer({ serviceName: "api-dns" });
-
-const r53   = tracer.captureAWSv3Client(new Route53Client({}));
-const ses   = tracer.captureAWSv3Client(new SESClient({}));
-const sesv2 = tracer.captureAWSv3Client(new SESv2Client({}));
+const r53   = new Route53Client({});
+const ses   = new SESClient({});
+const sesv2 = new SESv2Client({});
 
 const DOMAIN = process.env.MAIL_DOMAIN!;
 const HOSTED_ZONE_ID = process.env.HOSTED_ZONE_ID!;
 const SES_INBOUND_ENDPOINT = process.env.SES_INBOUND_ENDPOINT!;
 const AWS_REGION = process.env.AWS_REGION ?? "us-east-1";
+const DMARC_REPORT_EMAIL = process.env.DMARC_REPORT_EMAIL ?? "";
 
 export const handler = withErrors(logger, async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   const isAdmin = event.requestContext.authorizer?.isAdmin === "true";
@@ -108,7 +107,7 @@ async function checkDns(): Promise<APIGatewayProxyResult> {
   if (!dmarc || !dmarc.correct) {
     issues.push({
       type: "TXT", name: `_dmarc.${DOMAIN}.`,
-      value: `"v=DMARC1; p=quarantine; rua=mailto:dmarc@${DOMAIN}"`,
+      value: `"v=DMARC1; p=quarantine${DMARC_REPORT_EMAIL ? `; rua=mailto:${DMARC_REPORT_EMAIL}` : ""}"`,
       ttl: 300, present: !!dmarc?.present, correct: false,
     });
   }
@@ -254,7 +253,7 @@ async function listVerifiedEmails(): Promise<APIGatewayProxyResult> {
 
 async function addVerifiedEmail(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   const body = parseBody<{ email: string }>(event.body);
-  if (!body?.email) return json(400, { ok: false, error: "email required" });
+  if (!body?.email || !isEmail(body.email)) return json(400, { ok: false, error: "A valid email address is required" });
 
   await ses.send(new VerifyEmailIdentityCommand({ EmailAddress: body.email }));
   logger.info("Verification email sent", { email: body.email });
@@ -264,7 +263,8 @@ async function addVerifiedEmail(event: APIGatewayProxyEvent): Promise<APIGateway
 
 async function removeVerifiedEmail(path: string): Promise<APIGatewayProxyResult> {
   const email = decodeURIComponent(path.split("/verified-emails/")[1]);
-  if (!email) return json(400, { ok: false, error: "email required" });
+  // DeleteIdentity also takes a domain, and deleting this one stops all sending.
+  if (!email || !isEmail(email)) return json(400, { ok: false, error: "A valid email address is required" });
 
   await ses.send(new DeleteIdentityCommand({ Identity: email }));
   return json(200, { ok: true });
@@ -274,16 +274,13 @@ async function removeVerifiedEmail(path: string): Promise<APIGatewayProxyResult>
 
 async function getAllRecords(): Promise<ResourceRecordSet[]> {
   const all: ResourceRecordSet[] = [];
-  let nextToken: string | undefined;
-  do {
-    const res = await r53.send(new ListResourceRecordSetsCommand({
-      HostedZoneId: HOSTED_ZONE_ID,
-      StartRecordIdentifier: nextToken,
-    }));
+  let next: { StartRecordName?: string; StartRecordType?: RRType; StartRecordIdentifier?: string } = {};
+  for (;;) {
+    const res = await r53.send(new ListResourceRecordSetsCommand({ HostedZoneId: HOSTED_ZONE_ID, ...next }));
     all.push(...(res.ResourceRecordSets ?? []));
-    nextToken = res.NextRecordIdentifier;
-  } while (nextToken);
-  return all;
+    if (!res.IsTruncated) return all;
+    next = { StartRecordName: res.NextRecordName, StartRecordType: res.NextRecordType, StartRecordIdentifier: res.NextRecordIdentifier };
+  }
 }
 
 function checkMx(records: ResourceRecordSet[]): DnsRecord[] {

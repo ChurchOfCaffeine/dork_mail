@@ -10,6 +10,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import * as jwt from "jsonwebtoken";
 import type { AuthTokenPayload } from "@dork-mail/shared";
+import { accountIdFor } from "../jmap/ids";
 
 const logger = new Logger({ serviceName: "authorizer" });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -35,10 +36,14 @@ export const handler = async (
     const user = await ddb.send(new GetCommand({
       TableName: TABLE,
       Key: { pk: `user#${payload.sub}`, sk: "profile" },
-      ProjectionExpression: "isAdmin",
+      ProjectionExpression: "isAdmin, tokensValidAfter",
     }));
     if (!user.Item) {
       logger.warn("Token for deleted user", { sub: payload.sub });
+      return deny(event.methodArn);
+    }
+    if (payload.iat < (user.Item.tokensValidAfter ?? 0)) {
+      logger.warn("Token issued before password change", { sub: payload.sub });
       return deny(event.methodArn);
     }
 
@@ -63,6 +68,8 @@ export const handler = async (
       context: {
         userEmail: payload.sub,
         isAdmin: String(user.Item.isAdmin === true),
+        // The upload REST API names S3 keys after this, see terraform/upload.tf.
+        accountId: accountIdFor(payload.sub),
       },
     };
   } catch (err) {

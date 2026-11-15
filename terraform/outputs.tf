@@ -6,10 +6,11 @@ output "deploy_config" {
       "email-ingest" = aws_lambda_function.email_ingest.function_name
       "authorizer"   = aws_lambda_function.authorizer.function_name
       "api-auth"     = aws_lambda_function.api_auth.function_name
-      "api-mail"     = aws_lambda_function.api_mail.function_name
+      "api-jmap"     = aws_lambda_function.api_jmap.function_name
       "api-dns"      = aws_lambda_function.api_dns.function_name
     }
     web_bucket              = aws_s3_bucket.web.id
+    web_origin              = "https://${local.web_fqdn}"
     cloudfront_distribution = aws_cloudfront_distribution.web.id
     table                   = aws_dynamodb_table.main.name
     email_bucket            = aws_s3_bucket.emails.id

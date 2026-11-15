@@ -4,10 +4,11 @@
     "email-ingest": "dork-mail-email-ingest",
     "authorizer": "dork-mail-authorizer",
     "api-auth": "dork-mail-api-auth",
-    "api-mail": "dork-mail-api-mail",
+    "api-jmap": "dork-mail-api-jmap",
     "api-dns": "dork-mail-api-dns"
   },
   "web_bucket": "dork-mail-web-123456789012",
+  "web_origin": "https://mail.example.com",
   "cloudfront_distribution": "EXXXXXXXXXXXX",
   "table": "dork-mail-data",
   "email_bucket": "dork-mail-emails-123456789012"

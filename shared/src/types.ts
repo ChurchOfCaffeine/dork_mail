@@ -7,6 +7,9 @@ export interface StoredEmail {
   sk: string;
   /** folder-index GSI hash key: "mailbox#<email>#<folder>" */
   mailboxFolder: string;
+  threadId: string;
+  /** thread-index GSI hash key: "mailbox#<email>#<threadId>" */
+  mailboxThread: string;
 
   messageId: string;
   from: EmailAddress;
@@ -27,10 +30,15 @@ export interface StoredEmail {
   references?: string[];
   /** S3 keys for attachments */
   attachments?: Attachment[];
-  /** S3 key of the raw .eml */
+  /** S3 key of the raw .eml, empty for drafts */
   rawKey: string;
+  /** Raw message size in bytes */
+  size?: number;
 
-  receivedAt: string; // ISO8601
+  /** When this server received or stored it, ISO8601. Sorts the mailbox. */
+  receivedAt: string;
+  /** The sender's Date header, ISO8601 */
+  sentAt?: string;
   read: boolean;
   starred: boolean;
   labels: string[];
@@ -52,17 +60,15 @@ export interface Attachment {
   s3Key: string;
   /** Content-ID without angle brackets, referenced as cid: from the HTML body */
   contentId?: string;
-  /** Short-lived URL, only set on single-message responses for inline cid: images */
-  url?: string;
 }
 
-export const MAIL_FOLDERS = ["inbox", "archive", "sent", "trash", "spam"] as const;
+export const MAIL_FOLDERS = ["inbox", "archive", "drafts", "sent", "trash", "spam"] as const;
 export type MailFolder = (typeof MAIL_FOLDERS)[number];
 
-/** Fields returned by list queries. Bodies are only returned by the single-message endpoint. */
+/** Fields projected into folder-index, which Email/query scans. */
 export type EmailSummary = Pick<
   StoredEmail,
-  "messageId" | "from" | "to" | "cc" | "subject" | "snippet" | "receivedAt" | "read" | "starred" | "labels" | "folder" | "attachments"
+  "sk" | "messageId" | "threadId" | "from" | "to" | "cc" | "subject" | "snippet" | "searchText" | "receivedAt" | "read" | "starred" | "labels" | "folder" | "attachments"
 >;
 
 // ─── User / Mailbox ───────────────────────────────────────────────────────────
@@ -80,6 +86,15 @@ export interface User {
   createdAt: string;
   /** Whether this user can manage domain settings */
   isAdmin: boolean;
+  textSignature?: string;
+  htmlSignature?: string;
+  /** Sparse user-index GSI hash key, always "user" */
+  entity?: "user";
+  /** Unix seconds; access tokens issued before this are rejected by the authorizer */
+  tokensValidAfter?: number;
+  failedLogins?: number;
+  /** Unix seconds */
+  lockedUntil?: number;
 }
 
 /** User record with sensitive fields omitted — safe to return from API */
@@ -148,49 +163,3 @@ export interface AuthTokenPayload {
   isAdmin: boolean;
 }
 
-export interface OutgoingAttachment {
-  /** An uploads/ key from POST /mail/uploads, or an attachment key of the forwardOf message */
-  s3Key: string;
-  filename: string;
-  contentType: string;
-}
-
-export interface SendEmailRequest {
-  to: EmailAddress[];
-  cc?: EmailAddress[];
-  bcc?: EmailAddress[];
-  subject: string;
-  bodyText?: string;
-  bodyHtml?: string;
-  /** messageId of the message being replied to; sets In-Reply-To and References */
-  inReplyTo?: string;
-  /** messageId of the message being forwarded; allows its attachments in `attachments` */
-  forwardOf?: string;
-  attachments?: OutgoingAttachment[];
-}
-
-export interface UploadRequest {
-  filename: string;
-  contentType: string;
-  size: number;
-}
-
-export interface UploadResponse {
-  s3Key: string;
-  uploadUrl: string;
-}
-
-export interface ListEmailsResponse {
-  emails: EmailSummary[];
-  nextCursor?: string;
-}
-
-export interface UnreadCounts {
-  inbox: number;
-  spam: number;
-}
-
-export interface PushSubscriptionRequest {
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-}
