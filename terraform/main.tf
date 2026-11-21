@@ -1,18 +1,3 @@
-terraform {
-  required_version = ">= 1.7"
-  required_providers {
-    aws = {
-      source = "hashicorp/aws"
-      # 6.37.0 fixed key_schema GSIs being dropped and rebuilt on unrelated GSI changes.
-      version = ">= 6.37.0, < 7.0.0"
-    }
-    archive = {
-      source  = "hashicorp/archive"
-      version = ">= 2.0.0, < 3.0.0"
-    }
-  }
-}
-
 provider "aws" {
   region = var.aws_region
 
